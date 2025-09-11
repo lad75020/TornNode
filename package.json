@@ -41,5 +41,11 @@
     "node-redis": "^0.1.7"
   },
   "type": "commonjs",
-  "scripts": {}
+  "scripts": {
+    "memory:index": "node scripts/buildMemoryIndex.js",
+    "memory:install-hook": "node scripts/installMemoryGitHook.js",
+    "memory:read": "node scripts/readMemoryGraphs.js",
+    "memory:entities": "node scripts/generateAllEntitiesInput.js",
+    "memory:relations": "node scripts/generateRelations.js"
+  }
 }

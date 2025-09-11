@@ -10,3 +10,15 @@ public/index.html
 
 #Ignore insiders AI rules
 .github/instructions/codacy.instructions.md
+.memory-push.json
+memory-entities-input.json
+memory-graphs.json
+memory-index.json
+memory-relations.json
+memory-sample-entries.json
+MEMORY.md
+scripts/buildMemoryIndex.js
+scripts/generateAllEntitiesInput.js
+scripts/generateRelations.js
+scripts/installMemoryGitHook.js
+scripts/readMemoryGraphs.js

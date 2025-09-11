@@ -3,5 +3,6 @@ node_modules/*
 fetchLogsAndFillMongo.cjs
 .env
 .gitignore
-public/assets/*
+public/assets/**
 utils/fetchAllLogs.js
+public/index.html

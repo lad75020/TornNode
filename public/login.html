@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <title>Login</title>
+</head>
+<body>
+    <h2>Login to Torn Stats</h2>
+    <table>
+        <tr>
+            <td><img src="/images/Torn.png"/></td>
+            <td>
+                <form id="loginForm">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required>
+                    <br>
+                    <label for="passkey">Password&nbsp;</label>
+                    <input type="password" id="passkey" name="passkey" required>
+                    <br>
+                    <button name="Login" type="submit">Login</button>
+                </form>
+            </td>
+        </tr>
+    </table>
+
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const username = document.getElementById('username').value;
+            const passkey = document.getElementById('passkey').value;
+
+            fetch('/authenticate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username: username, passkey: passkey })
+            }).then(response => response.json())
+              .then(data => {
+                  if (data.success) {
+                      localStorage.setItem('jwt', data.token);
+                      window.location.href = '/';
+                  } else {
+                      alert('Login failed: ' + data.message);
+                  }
+              })
+              .catch(error => {
+                  console.error('Error:', error);
+                  alert('An error occurred during login.');
+              });
+        });
+    </script>
+</body>
+</html>

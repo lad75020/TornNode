@@ -1,0 +1,52 @@
+{
+    // Utilisez IntelliSense pour en savoir plus sur les attributs possibles.
+    // Pointez pour afficher la description des attributs existants.
+    // Pour plus d'informations, visitez : https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Torn Stats",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/tonstatsdubbo.js",
+            "args": [
+                "--log",
+                "--port",
+                "3110",
+                "--https",
+                "--host",
+                "127.0.0.1",
+                "--bootstrap",
+                "--test"
+            ],
+            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.6.0/bin/node"
+        }
+    ,
+        
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Stats Filler",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/fetchAllStatsAndInsert.js",
+            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.5.0/bin/node"
+        },
+        
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Log Inserter",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/fetchLogsAndFillMongo.cjs",
+            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.5.0/bin/node"
+        }
+    ]
+}

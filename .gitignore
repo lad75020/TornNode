@@ -6,3 +6,7 @@ fetchLogsAndFillMongo.cjs
 public/assets/**
 utils/fetchAllLogs.js
 public/index.html
+.codacy/**
+
+#Ignore insiders AI rules
+.github/instructions/codacy.instructions.md

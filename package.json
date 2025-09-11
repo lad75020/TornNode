@@ -46,6 +46,11 @@
     "memory:install-hook": "node scripts/installMemoryGitHook.js",
     "memory:read": "node scripts/readMemoryGraphs.js",
     "memory:entities": "node scripts/generateAllEntitiesInput.js",
-    "memory:relations": "node scripts/generateRelations.js"
+    "memory:relations": "node scripts/generateRelations.js",
+    "memory:diff": "node scripts/memoryDiff.js",
+    "memory:playbook": "node scripts/addPlaybook.js",
+  "memory:quality": "node scripts/memoryQuality.js",
+  "memory:report": "node scripts/memoryReport.js"
+    ,"memory:refresh": "npm run memory:index && npm run memory:entities && npm run memory:read && npm run memory:relations && npm run memory:read && npm run memory:diff && npm run memory:quality"
   }
 }

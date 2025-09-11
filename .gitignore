@@ -16,9 +16,9 @@ memory-graphs.json
 memory-index.json
 memory-relations.json
 memory-sample-entries.json
-MEMORY.md
-scripts/buildMemoryIndex.js
-scripts/generateAllEntitiesInput.js
-scripts/generateRelations.js
-scripts/installMemoryGitHook.js
-scripts/readMemoryGraphs.js
+memory-diff.json
+
+
+.gitignore
+memory-quality.json
+memory-report.html

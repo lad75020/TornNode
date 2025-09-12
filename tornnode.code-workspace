@@ -6,5 +6,8 @@
         {
             "path": "../Expo"
         }
-    ]
+    ],
+    "settings": {
+        "chat.agent.maxRequests": 128
+    }
 }

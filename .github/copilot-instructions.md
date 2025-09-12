@@ -60,7 +60,7 @@ Objectifs:
 Endpoints principaux (mêmes conventions que l'extension VS Code memory):
 - `POST /create_entities` { namespace?, entities: [ { id|name, entityType, observations[], tags? } ] }
 - `POST /create_relations` { relations: [ { type:"relation", from, relationType, to } ] }
-- `GET /read_graph` ou `POST /read_graph` (selon impl) pour récupérer les entités + relations; variante utilisée par le script local: `/read_graphs`, `/graphs`, `/entities` (fallback multi-chemins géré côté scripts).
+- ``POST /read_graph`  pour récupérer les entités + relations; 
 - Recherche: si exposé, `/search_nodes` (POST { query }) ou équivalent (adapter selon impl réelle).
 
 Scripts utilitaires déjà présents (backend):

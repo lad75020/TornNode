@@ -9,7 +9,12 @@
 			"**/node_modules": true,
 			"**/.git": true,
 			"**/.DS_Store": true
-		}
+		},
+		"githubPullRequests.remotes": [
+			"origin",
+			"upstream",
+			"tornhub"
+		]
 	},
 
 }

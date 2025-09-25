@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 
 let cachedJsonView = null;
 async function ensureJsonView() {
@@ -13,6 +13,8 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
   const [failed, setFailed] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [filter, setFilter] = useState('');
+  const jsonViewInstanceRef = useRef(null); // Store the jsonview instance to preserve expansion state
+  const lastRenderedValueRef = useRef(null); // Track the last rendered value to prevent unnecessary re-renders
 
   const filteredValue = useMemo(() => {
     if (!filter || !value) return value;
@@ -33,8 +35,40 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
 
   useEffect(() => {
     if (!containerRef.current) return;
+    
+    // Create a stable string representation of the filtered value to compare
+    const currentValueStr = JSON.stringify(filteredValue);
+    
+    // Only re-render if the actual data has changed
+    if (lastRenderedValueRef.current === currentValueStr) {
+      return; // No change in data, skip re-rendering to preserve expansion state
+    }
+    
+    // Capture current expansion state before clearing
+    const expansionState = {};
+    const captureExpansionState = (container) => {
+      const expandedNodes = container.querySelectorAll('.fa-caret-down');
+      expandedNodes.forEach((node) => {
+        const line = node.closest('.line');
+        if (line) {
+          const keyElement = line.querySelector('.json-key');
+          if (keyElement) {
+            const key = keyElement.textContent;
+            const depth = parseInt(line.style.marginLeft || '0') / 18;
+            expansionState[`${depth}-${key}`] = true;
+          }
+        }
+      });
+    };
+    
+    if (containerRef.current.children.length > 0) {
+      captureExpansionState(containerRef.current);
+    }
+    
     containerRef.current.innerHTML = '';
     setFailed(false);
+    lastRenderedValueRef.current = currentValueStr;
+    
     (async () => {
       try {
         const jsonview = await ensureJsonView();
@@ -45,7 +79,38 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
           }
             return v;
         }));
-        jsonview.renderJSON({ root: safe }, containerRef.current);
+        const instance = jsonview.renderJSON({ root: safe }, containerRef.current);
+        jsonViewInstanceRef.current = instance;
+        
+        // Restore expansion state after a short delay to ensure DOM is ready
+        setTimeout(() => {
+          const restoreExpansionState = (container) => {
+            const collapsedNodes = container.querySelectorAll('.fa-caret-right');
+            collapsedNodes.forEach((node) => {
+              const line = node.closest('.line');
+              if (line) {
+                const keyElement = line.querySelector('.json-key');
+                if (keyElement) {
+                  const key = keyElement.textContent;
+                  const depth = parseInt(line.style.marginLeft || '0') / 18;
+                  const stateKey = `${depth}-${key}`;
+                  if (expansionState[stateKey]) {
+                    // Simulate click to expand
+                    const caretIcon = line.querySelector('.caret-icon');
+                    if (caretIcon) {
+                      caretIcon.click();
+                    }
+                  }
+                }
+              }
+            });
+          };
+          
+          if (containerRef.current && Object.keys(expansionState).length > 0) {
+            restoreExpansionState(containerRef.current);
+          }
+        }, 10);
+        
       } catch (e) {
         setFailed(true);
         setErrorMsg(e.message || String(e));

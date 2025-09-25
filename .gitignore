@@ -1,4 +1,4 @@
-node_modules/*
+**/node_modules/*
 .vscode/mcp.json
 fetchLogsAndFillMongo.cjs
 .env
@@ -22,3 +22,4 @@ memory-diff.json
 .gitignore
 memory-quality.json
 memory-report.html
+client/dist/**

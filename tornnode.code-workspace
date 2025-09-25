@@ -1,13 +1,15 @@
 {
-    "folders": [
-        {
-            "path": "."
-        },
-        {
-            "path": "../Expo"
-        }
-    ],
-    "settings": {
-        "chat.agent.maxRequests": 128
-    }
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"**/node_modules": true,
+			"**/.git": true,
+			"**/.DS_Store": true
+		}
+	},
+
 }

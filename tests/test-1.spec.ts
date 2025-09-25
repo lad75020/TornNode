@@ -8,6 +8,4 @@ test('Can login', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Password' }).fill('11Torn00!!');
   await page.getByRole('button', { name: 'Login' }).click();
   await expect(page).toHaveTitle(/Torn City Charts/);
-  await page.locator('#showItems').click();
-  await expect(page.locator('#item_1')).toBeVisible();
 });

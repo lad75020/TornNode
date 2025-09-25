@@ -22,6 +22,7 @@ const ROOT = path.join(__dirname, '..');
 const WS_DIR = path.join(ROOT, 'ws');
 const UTILS_DIR = path.join(ROOT, 'utils');
 const OUTPUT_FILE = path.join(ROOT, 'memory-index.json');
+const FRONT_SRC = path.join(ROOT, 'client', 'src');
 
 function sha1(content) {
   return crypto.createHash('sha1').update(content).digest('hex');
@@ -51,9 +52,9 @@ function summarizeWsHandler(name, code) {
   const flags = extractProgressFlags(code).filter(f => /import|progress|deferred|stop/i.test(f));
   const longProcess = /setTimeout|setInterval|await new Promise|for \(let i=0;i<.+?100/.test(code) || /INTERVAL\s*=\s*900/.test(code);
   let summary;
-  if (name === 'wsTorn.js') {
+  if (name === 'wsTorn.cjs') {
     summary = 'Import segmenté des logs (15min) avec progression percent, différé attaques.';
-  } else if (name === 'wsUpdatePrice.js') {
+  } else if (name === 'wsUpdatePrice.cjs') {
     summary = 'Mise à jour prix item: Mongo Items + Redis JSON.SET + log daily variation TTL 3j.';
   } else {
     summary = (types.length ? `Émet types ${types.slice(0,5).join(', ')}` : 'Handler générique') + (longProcess ? ' (process long détecté)' : '');
@@ -64,7 +65,7 @@ function summarizeWsHandler(name, code) {
 function scanWsHandlers() {
   if (!fs.existsSync(WS_DIR)) return [];
   return fs.readdirSync(WS_DIR)
-    .filter(f => f.startsWith('ws') && f.endsWith('.js'))
+    .filter(f => f.startsWith('ws') && f.endsWith('.cjs'))
     .map(f => {
       const filePath = path.join(WS_DIR, f);
       const code = readSafe(filePath);
@@ -72,7 +73,7 @@ function scanWsHandlers() {
       const hash = sha1(code);
       const meta = summarizeWsHandler(f, code);
       return {
-        id: `ws:${f.replace('.js','')}`,
+        id: `ws:${f.replace('.cjs','')}`,
         kind: 'ws-handler',
         file: `ws/${f}`,
         hash,
@@ -87,7 +88,7 @@ function scanWsHandlers() {
 }
 
 function extractCollectionsFromEnsure() {
-  const ensureFile = path.join(UTILS_DIR, 'ensureUserDbStructure.js');
+  const ensureFile = path.join(UTILS_DIR, 'ensureUserDbStructure.cjs');
   const code = readSafe(ensureFile);
   let lastTouched=null; try { const st=fs.statSync(ensureFile); lastTouched=st.mtime.toISOString(); } catch {}
   const match = code.match(/const required = \[(.*?)\];/s);
@@ -108,14 +109,14 @@ function extractCollectionsFromEnsure() {
 }
 
 function summarizeDailyAverager() {
-  const file = path.join(ROOT, 'dailyPriceAverager.js');
+  const file = path.join(ROOT, 'dailyPriceAverager.cjs');
   const code = readSafe(file);
   if (!code) return null;
   let lastTouched=null; try { const st=fs.statSync(file); lastTouched=st.mtime.toISOString(); } catch {}
   return {
     id: 'batch:dailyPriceAverage',
     kind: 'batch-task',
-    file: 'dailyPriceAverager.js',
+    file: 'dailyPriceAverager.cjs',
     hash: sha1(code),
     lastTouched,
     summary: 'Calcule moyennes journalières prix items à partir des variations en Redis (listes pricevars:YYYYMMDD:<itemId>).',
@@ -124,7 +125,7 @@ function summarizeDailyAverager() {
 }
 
 function summarizeFrontendBuild() {
-  const vitePath = path.join(ROOT, '..', 'Expo', 'vite.config.js');
+  const vitePath = path.join(ROOT, 'vite.config.js');
   const code = readSafe(vitePath);
   if (!code) return null;
   let lastTouched=null; try { const st=fs.statSync(vitePath); lastTouched=st.mtime.toISOString(); } catch {}
@@ -132,12 +133,60 @@ function summarizeFrontendBuild() {
   return {
     id: 'front:buildChunks',
     kind: 'frontend-build',
-    file: 'Expo/vite.config.js',
+    file: '../vite.config.js',
     hash: sha1(code),
   lastTouched,
     summary: hasManualChunks ? 'Découpage manuel rollup vendors: react, chart, bootstrap.' : 'Pas de découpage manuel détecté.',
     tags: ['arch:frontend','perf:patterns']
   };
+}
+
+function summarizeUtilFetchOrReuse() {
+  const f = path.join(UTILS_DIR, 'fetchOrReuseSnapshot.cjs');
+  if (!fs.existsSync(f)) return null;
+  const code = readSafe(f);
+  let lastTouched=null; try { const st=fs.statSync(f); lastTouched=st.mtime.toISOString(); } catch {}
+  return {
+    id: 'util:fetchOrReuseSnapshot',
+    kind: 'util-backend',
+    file: 'utils/fetchOrReuseSnapshot.cjs',
+    hash: sha1(code),
+    lastTouched,
+    summary: 'Util générique snapshot gating (reuseWindowMs, fallback stale, insert Mongo).',
+    tags: ['util:snapshot','ws:reuse','perf:api']
+  };
+}
+
+function scanFrontHooksAndComponents() {
+  if (!fs.existsSync(FRONT_SRC)) return [];
+  const targets = [];
+  const wantedHooks = new Set(['useAppWebSocket.js','useWsMessageBus.js','useChartSlider.js']);
+  const wantedComponents = new Set([
+    'CompanyProfileChart.jsx',
+    'CompanyStockChart.jsx','CompanyStockHistoryChart.jsx',
+    'CompanyDetailsHistoryChart.jsx',
+    'BloodAidDailyChart.jsx'
+  ]);
+  function addEntry(file, kind, summary, tags) {
+    const abs = path.join(FRONT_SRC, file);
+    const code = readSafe(abs);
+    const hash = sha1(code);
+    let lastTouched=null; try { const st=fs.statSync(abs); lastTouched=st.mtime.toISOString(); } catch {}
+    targets.push({ id: `${kind === 'frontend-hook' ? 'front:hook:' : 'front:comp:'}${file.replace(/\.(jsx|js)$/,'')}`, kind, file: `client/src/${file}`, hash, lastTouched, summary, tags });
+  }
+  // Hooks
+  wantedHooks.forEach(f => { if (fs.existsSync(path.join(FRONT_SRC,'hooks',f))) {
+    const summary = f==='useAppWebSocket.js' ? 'Hook WebSocket principal: gestion connexion, reconnexion, heartbeat, accumulation messages (strings JSON).'
+      : f==='useWsMessageBus.js' ? 'Bus de dispatch message WS: parse dernier message et déclenche handlers dédiés.'
+      : 'Hook slider charts/navigation.';
+    addEntry(path.join('hooks', f), 'frontend-hook', summary, ['front:hook']);
+  }});
+  // Components cibles
+  wantedComponents.forEach(f => { if (fs.existsSync(path.join(FRONT_SRC, f))) {
+    const summary = f.includes('Profile') ? 'Chart profil compagnie (snapshot + historique local).' : 'Chart stock compagnie (snapshot + historique).';
+    addEntry(f, 'frontend-component', summary, ['front:chart','company']);
+  }});
+  return targets;
 }
 
 function coreConventionsEntry() {
@@ -162,6 +211,8 @@ function buildIndex() {
   const daily = summarizeDailyAverager(); if (daily) entries.push(daily);
   const front = summarizeFrontendBuild(); if (front) entries.push(front);
   entries.push(coreConventionsEntry());
+  const utilFetch = summarizeUtilFetchOrReuse(); if (utilFetch) entries.push(utilFetch);
+  entries.push(...scanFrontHooksAndComponents());
   return {
     generatedAt: new Date().toISOString(),
     version: 1,

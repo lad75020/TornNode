@@ -49,9 +49,9 @@ function buildIndex(entities){
 }
 
 function safeReadFile(rel){
-  const maybeJsx = rel.match(/^(Expo\/src\/.+)(?:\.jsx|)$/);
+  const maybeJsx = rel.match(/^(client\/src\/.+)(?:\.jsx|)$/);
   let localPath;
-  if (rel.startsWith('Expo/src/')) {
+  if (rel.startsWith('client/src/')) {
     // Fichier frontend: ajouter extension connue si manquante
     const base = path.join(ROOT, '..', rel + (rel.endsWith('.js')||rel.endsWith('.jsx')?'':'.jsx'));
     localPath = base;

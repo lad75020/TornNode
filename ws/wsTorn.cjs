@@ -55,6 +55,62 @@ module.exports = async function wsTorn(socket, req, fastify) {
                     if (typeof value.timestamp !== 'number') continue;
                     value.date = new Date(value.timestamp * 1000);
                     value._id = value.id;
+                    if ((value.log === 9020) || (value.details && value.details.id === 9020)) {
+                        try {
+                            const itemsGained = value && value.data ? value.data.items_gained : null;
+                            // Collect numeric IDs from items_gained (object keys preferred; fallback to array of objects)
+                            let ids = [];
+                            if (itemsGained && typeof itemsGained === 'object' && !Array.isArray(itemsGained)) {
+                                ids = Object.keys(itemsGained).map(k => Number(k)).filter(n => Number.isFinite(n));
+                            } else if (Array.isArray(itemsGained)) {
+                                ids = itemsGained.map(it => Number(it && (it.id != null ? it.id : it.item_id))).filter(n => Number.isFinite(n));
+                            }
+                            const redis = fastify && fastify.redis;
+                            const names = [];
+                            if (redis && ids && ids.length) {
+                                const { ITEMS_KEY_PREFIX } = require('../utils/itemsCacheKey.cjs');
+                                let multi, canPipeline = false;
+                                try { multi = redis.multi(); canPipeline = !!multi; } catch (_) { canPipeline = false; }
+                                if (canPipeline) {
+                                    ids.forEach(id => {
+                                        const cmd = ['JSON.GET', `${ITEMS_KEY_PREFIX}${id}`, '$.name'];
+                                        if (typeof multi.addCommand === 'function') multi.addCommand(cmd); else multi.sendCommand(cmd);
+                                    });
+                                    const res = await multi.exec();
+                                    const arr = Array.isArray(res) ? res : [];
+                                    for (const r of arr) {
+                                        let v = Array.isArray(r) ? r[1] : r;
+                                        if (typeof v === 'string' && v.length) {
+                                            try {
+                                                const parsed = JSON.parse(v); // RedisJSON returns JSON string, e.g., ["Name"]
+                                                const nameVal = Array.isArray(parsed) ? parsed[0] : parsed;
+                                                if (typeof nameVal === 'string') names.push(nameVal);
+                                            } catch(_) {}
+                                        }
+                                    }
+                                } else {
+                                    // Fallback sequential
+                                    for (const id of ids) {
+                                        try {
+                                            const raw = await redis.sendCommand(['JSON.GET', `${ITEMS_KEY_PREFIX}${id}`, '$.name']);
+                                            if (typeof raw === 'string' && raw.length) {
+                                                const parsed = JSON.parse(raw);
+                                                const nameVal = Array.isArray(parsed) ? parsed[0] : parsed;
+                                                if (typeof nameVal === 'string') names.push(nameVal);
+                                            }
+                                        } catch(_) {}
+                                    }
+                                }
+                            }
+                            // Deduplicate and assign to value.data.items_names
+                            const seen = new Set();
+                            if (!value.data || typeof value.data !== 'object') value.data = {};
+                            value.data.items_names = names.filter(n => (n && (seen.has(n) ? false : (seen.add(n), true))));
+                        } catch (_) {
+                            try { if (!value.data) value.data = {}; value.data.items_names = []; } catch {}
+                        }
+                    }
+                    
                     delete value.id;
                     if (value.details) {
                         value.log = value.details.id;

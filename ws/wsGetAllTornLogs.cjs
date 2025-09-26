@@ -34,7 +34,8 @@ module.exports = async function wsGetAllTornLogs(socket, req, fastify, parsed) {
         title: 1,
         timestamp: 1,
         category: 1,
-        data: 1
+        data: 1,
+        items_names: 1
       },
       sort: { timestamp: 1 }
     };

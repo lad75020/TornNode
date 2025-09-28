@@ -1,9 +1,6 @@
 module.exports = async function wsUpdatePrice(socket, req, fastify, parsed, redisClient, opts = {}) {
   const { isTest = false } = opts;
-  if (!req.session || !req.session.TornAPIKey) {
-    try { socket.send(JSON.stringify({ type:'updatePrice', ok:false, error:'unauthorized' })); } catch {}
-    return;
-  }
+
   const { id, price: suppliedPrice } = parsed || {};
   const idInt = parseInt(id);
   if (!Number.isFinite(idInt)) {

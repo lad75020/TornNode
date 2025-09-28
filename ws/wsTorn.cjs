@@ -1,9 +1,5 @@
 module.exports = async function wsTorn(socket, req, fastify) {
-    try {
-        if (!req.session || !req.session.TornAPIKey) {
-            try { socket.send(JSON.stringify({ type:'importProgress', kind:'logs', error:'unauthorized'})); } catch {}
-            return;
-        }
+try {
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
     await ensureUserDbStructure(fastify, req.session.userID, fastify && fastify.log);

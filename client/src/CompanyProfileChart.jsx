@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Bar, Line } from 'react-chartjs-2';
-import { Chart as ChartJS, TimeScale, LinearScale, BarElement, PointElement, LineElement, Tooltip, Legend, CategoryScale } from 'chart.js';
 import 'chartjs-adapter-date-fns';
-try { ChartJS.register(TimeScale, LinearScale, BarElement, PointElement, LineElement, Tooltip, Legend, CategoryScale); } catch {}
+import useWsMessageBus from './hooks/useWsMessageBus.js';
+import useChartTheme from './useChartTheme.js';
 
 /* CompanyProfileChart (copie alignée sur version Expo, placée ici pour build Vite principal)
    Affiche métriques snapshot + historique local minimal. */
@@ -13,31 +13,28 @@ export default function CompanyProfileChart({ sendWs, wsMessages, chartHeight = 
   const [loadingHistory, setLoadingHistory] = useState(false);
   const lastTsRef = useRef(null);
   const [metric, setMetric] = useState('daily_income');
+  const { themedOptions, ds } = useChartTheme(darkMode);
   // (Logs debug supprimés pour production)
   useEffect(() => {
     try { sendWs && sendWs({ type:'companyProfile' }); } catch {}
     try { setLoadingHistory(true); sendWs && sendWs({ type:'getCompanyProfileHistory' }); } catch { setLoadingHistory(false); }
   }, []);
 
-  useEffect(() => {
-    if (!Array.isArray(wsMessages) || wsMessages.length === 0) return;
-    let lastObj = null;
-    for (let i = wsMessages.length - 1; i >= 0; i--) {
-      const raw = wsMessages[i];
-      if (typeof raw !== 'string') continue; // messages du hook sont des strings JSON
-      if (raw[0] !== '{') continue; // pas un JSON object
-      let parsed;
-      try { parsed = JSON.parse(raw); } catch { continue; }
-      if (parsed && parsed.type === 'companyProfile') { lastObj = parsed; break; }
+  useWsMessageBus(wsMessages, {
+    onCompanyProfile: (lastObj) => {
+      if (!lastObj || lastObj.ok === false) return;
+      setSnapshot(lastObj);
+      const tsNum = Number(lastObj.timestamp);
+      if (tsNum && lastObj.profile && tsNum !== lastTsRef.current) {
+        lastTsRef.current = tsNum;
+        setHistory(h => [...h, { t: tsNum, profile: lastObj.profile }]);
+      }
+    },
+    onCompanyProfileHistory: (parsed) => {
+      setLoadingHistory(false);
+      if (parsed.ok && parsed.series) setSeries(parsed.series);
     }
-    if (!lastObj || lastObj.ok === false) return;
-    setSnapshot(lastObj);
-    const tsNum = Number(lastObj.timestamp);
-    if (tsNum && lastObj.profile && tsNum !== lastTsRef.current) {
-      lastTsRef.current = tsNum;
-      setHistory(h => [...h, { t: tsNum, profile: lastObj.profile }]);
-    }
-  }, [wsMessages, wsMessages.length]);
+  });
 
   // Capture historique complet depuis backend
   useEffect(() => {
@@ -81,7 +78,16 @@ export default function CompanyProfileChart({ sendWs, wsMessages, chartHeight = 
     } else {
       points = history.map(h => ({ x: h.t, y: safeNumber(h.profile[metric]) }));
     }
-    return { datasets: [{ label: metricsDefs.find(m => m.key === metric)?.label || metric, data: points, borderColor:'rgba(75,192,192,0.9)', backgroundColor:'rgba(75,192,192,0.25)', tension:0.2, spanGaps:true, pointRadius:3 }] };
+    return {
+      datasets: [
+        ds('line', 0, points, {
+          label: metricsDefs.find(m => m.key === metric)?.label || metric,
+          tension: 0.2,
+          spanGaps: true,
+          pointRadius: 3,
+        })
+      ]
+    };
   }, [history, series, metric]);
 
   const barData = useMemo(() => {
@@ -89,26 +95,22 @@ export default function CompanyProfileChart({ sendWs, wsMessages, chartHeight = 
     const wanted = ['daily_income','weekly_income','employees_hired','employees_capacity'];
     const labels = wanted.map(k => metricsDefs.find(m => m.key === k)?.label || k);
     const values = wanted.map(k => safeNumber(profile[k]));
-    return { labels, datasets: [{ label:'Current Snapshot', data: values, backgroundColor:'rgba(153,102,255,0.6)' }] };
+    return { labels, datasets: [ ds('bar', 0, values, { label:'Current Snapshot' }) ] };
   }, [profile]);
 
-  const lineOptions = {
+  const lineOptions = themedOptions({
     responsive:true, maintainAspectRatio:false,
+    interaction:{ mode:'index', intersect:false },
     scales:{
-      x:{ type:'time', time:{ unit:'hour', tooltipFormat:'PPpp' }, ticks:{ color: darkMode ? '#ddd':'#333' }, grid:{ color: darkMode ? 'rgba(255,255,255,0.08)':'rgba(0,0,0,0.1)' } },
-      y:{ ticks:{ color: darkMode ? '#ddd':'#333' }, grid:{ color: darkMode ? 'rgba(255,255,255,0.08)':'rgba(0,0,0,0.1)' } }
-    },
-    plugins:{ legend:{ labels:{ color: darkMode ? '#eee':'#222' } }, tooltip:{ mode:'index', intersect:false } }
-  };
+      x:{ type:'time', time:{ unit:'hour', tooltipFormat:'PPpp' } },
+      y:{ }
+    }
+  });
 
-  const barOptions = {
+  const barOptions = themedOptions({
     responsive:true, maintainAspectRatio:false,
-    scales:{
-      x:{ ticks:{ color: darkMode ? '#ddd':'#333' }, grid:{ display:false } },
-      y:{ ticks:{ color: darkMode ? '#ddd':'#333' }, grid:{ color: darkMode ? 'rgba(255,255,255,0.08)':'rgba(0,0,0,0.1)' } }
-    },
-    plugins:{ legend:{ labels:{ color: darkMode ? '#eee':'#222' } } }
-  };
+    scales:{ x:{ grid:{ display:false } }, y:{} },
+  });
 
   return (
     <div style={{ width:'100%', height: chartHeight, display:'flex', flexDirection:'column' }}>

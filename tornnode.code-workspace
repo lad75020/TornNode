@@ -14,7 +14,9 @@
 			"origin",
 			"upstream",
 			"tornhub"
-		]
+		],
+		"chatgpt.openOnStartup": true,
+		"editor.defaultFormatter": "GitHub.copilot"
 	},
 
 }

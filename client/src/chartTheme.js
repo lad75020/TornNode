@@ -20,6 +20,8 @@ export function applyCommonChartOptions(baseOptions = {}, darkMode) {
     ...baseOptions,
     plugins: {
       ...baseOptions.plugins,
+      // Enable decimation by default for better performance with large sets
+      decimation: baseOptions.plugins?.decimation ?? { enabled: true, algorithm: 'lttb', samples: 500 },
       legend: baseOptions.plugins?.legend === false ? false : {
         ...(baseOptions.plugins?.legend || {}),
         labels: { ...(baseOptions.plugins?.legend?.labels || {}), color: text }

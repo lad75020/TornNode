@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { getAllItemsFromIDB } from './syncItemsToIndexedDB.js';
 
 import { refreshPriceViaWs, handleUpdatePriceMessage } from './UpdatePrice.jsx';
+import useWsMessageBus from './hooks/useWsMessageBus.js';
 
 
 function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], sendWs, wsMessages }) {
@@ -10,6 +11,7 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
   const [filtered, setFiltered] = useState([]);
   const [refreshingIds, setRefreshingIds] = useState(new Set());
   const lastClickRef = useRef(new Map()); // itemId -> timestamp
+  const [debouncedQuery, setDebouncedQuery] = useState('');
 
   // Initial load: read local IndexedDB then request fresh list via WebSocket
   useEffect(() => {
@@ -31,49 +33,47 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
     return () => { cancelled = true; };
   }, [token, sendWs]);
 
-  // Rafraîchir liste affichée si un sync externe a mis à jour IndexedDB (poll simple sur timestamp localStorage)
+  // Rafraîchir via événement storage (multi-tab) au lieu de polling
   useEffect(() => {
     if (!token) return;
-    let lastSeen = localStorage.getItem('itemsLastSync');
-    const id = setInterval(async () => {
-      const cur = localStorage.getItem('itemsLastSync');
-      if (cur && cur !== lastSeen) {
-        lastSeen = cur;
+    const onStorage = async (ev) => {
+      if (ev.key === 'itemsLastSync') {
         const localItems = await getAllItemsFromIDB();
         if (localItems.length) setItems(localItems);
       }
-    }, 10000); // 10s
-    return () => clearInterval(id);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [token]);
 
+  // Debounce input
   useEffect(() => {
-    const q = (query || '').toLowerCase();
-    setFiltered(
-      items.filter(item => {
-        const name = (item && typeof item.name === 'string') ? item.name : '';
-        return name.toLowerCase().startsWith(q);
-      })
-    );
-  }, [query, items]);
+    const id = setTimeout(() => setDebouncedQuery((query || '').toLowerCase()), 200);
+    return () => clearTimeout(id);
+  }, [query]);
 
-  // Écoute des messages WS pour updatePrice & getAllTornItems
   useEffect(() => {
-    if (!wsMessages || !wsMessages.length) return;
-    const last = wsMessages[wsMessages.length - 1];
-    if (!last || last[0] !== '{') return;
-    try {
-      const parsed = JSON.parse(last);
-      if (parsed.type === 'updatePrice') {
-        if (parsed.ok && typeof parsed.id !== 'undefined' && typeof parsed.price === 'number') {
-          setItems(prev => prev.map(it => it.id === parsed.id ? { ...it, price: parsed.price } : it));
-        }
-        // Mise à jour IDB asynchrone
-        handleUpdatePriceMessage(parsed).catch(()=>{});
-      } else if (parsed.type === 'getAllTornItems' && parsed.ok && Array.isArray(parsed.items)) {
-        setItems(parsed.items);
+    const q = debouncedQuery;
+    if (!q) { setFiltered(items.slice(0, 300)); return; }
+    const out = items.filter(item => {
+      const name = (item && typeof item.name === 'string') ? item.name : '';
+      return name.toLowerCase().startsWith(q);
+    });
+    setFiltered(out);
+  }, [debouncedQuery, items]);
+
+  // Écoute des messages WS via bus
+  useWsMessageBus(wsMessages, {
+    onUpdatePrice: (parsed) => {
+      if (parsed.ok && typeof parsed.id !== 'undefined' && typeof parsed.price === 'number') {
+        setItems(prev => prev.map(it => it.id === parsed.id ? { ...it, price: parsed.price } : it));
       }
-    } catch {}
-  }, [wsMessages]);
+      handleUpdatePriceMessage(parsed).catch(()=>{});
+    },
+    onGetAllTornItems: (parsed) => {
+      if (parsed.ok && Array.isArray(parsed.items)) setItems(parsed.items);
+    },
+  });
 
   if (!token) {
     location.href = '/';
@@ -94,7 +94,7 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
           {filtered.length === 0 && (
             <li style={{ listStyle:'none', padding:8, fontStyle:'italic', opacity:0.6 }}>Aucun résultat</li>
           )}
-          {filtered.map(item => (
+          {filtered.slice(0, 300).map(item => (
             <li
               key={item.id}
               style={{ listStyle: 'none', padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
@@ -154,6 +154,9 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
               </button>
             </li>
           ))}
+          {filtered.length > 300 && (
+            <li style={{ listStyle:'none', padding:6, fontSize:11, color:'#555' }}>Showing first 300 of {filtered.length}</li>
+          )}
         </ul>
       )}
       

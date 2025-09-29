@@ -23,10 +23,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import { pushToast, pushOrReplaceToast } from './toastBus.js';
 import ToastHost from './ToastHost.jsx';
 // Enregistrement global Chart.js pour éviter les erreurs "point/line/bar is not registered"
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend } from 'chart.js';
-try {
-  ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
-} catch(_) { /* ignore double register */ }
+import './chartSetup.js';
 const Autocomplete = lazy(() => import('./Autocomplete.jsx'));
 import { handleStoreLogs } from './storeLogsToIndexedDB.jsx';
 import { writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
@@ -903,4 +900,3 @@ createRoot(document.getElementById('root')).render(
 );
 
 export default Main;
-

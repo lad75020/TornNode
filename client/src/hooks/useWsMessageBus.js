@@ -49,7 +49,27 @@ export default function useWsMessageBus(messages, handlers = {}) {
           attacksImported: parsed.attacksImported,
         });
         break;
+      // Company related messages
+      case 'companyStock':
+        h.onCompanyStock && h.onCompanyStock(parsed);
+        break;
+      case 'getCompanyStockHistory':
+        h.onCompanyStockHistory && h.onCompanyStockHistory(parsed);
+        break;
+      case 'companyProfile':
+        h.onCompanyProfile && h.onCompanyProfile(parsed);
+        break;
+      case 'getCompanyProfileHistory':
+        h.onCompanyProfileHistory && h.onCompanyProfileHistory(parsed);
+        break;
+      case 'getCompanyDetailsHistory':
+        h.onCompanyDetailsHistory && h.onCompanyDetailsHistory(parsed);
+        break;
+      case 'updatePrice':
+        h.onUpdatePrice && h.onUpdatePrice(parsed);
+        break;
       default:
+        if (h.onAny) h.onAny(parsed);
         break;
     }
   }, [messages]);

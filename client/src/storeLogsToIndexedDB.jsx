@@ -125,7 +125,9 @@ export function handleStoreLogs(setStoreProgress, { ws, send, requestId: externa
         try {
           const tx = (await openDB(dbName, 2)).transaction(storeName, 'readwrite');
           const st = tx.store;
-          for (const obj of parsed.batch) { try { await st.put(obj); } catch {} }
+          for (const obj of parsed.batch) {
+            try { st.put(obj); } catch {}
+          }
           await tx.done;
         } catch(e) { console.error('[handleStoreLogs] write batch', e); }
         current += parsed.batch.length;

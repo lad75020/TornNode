@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-export default function useAppWebSocket(path, token, { heartbeatMs = 25000, reconnectMs = 1000 } = {}) {
+export default function useAppWebSocket(
+  path,
+  token,
+  { heartbeatMs = 25000, reconnectMs = 1000, maxMessages = 800 } = {}
+) {
   const wsRef = useRef(null);
   const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState('closed');
@@ -49,7 +53,12 @@ export default function useAppWebSocket(path, token, { heartbeatMs = 25000, reco
             }
           }
         } catch {}
-        setMessages(prev => [...prev, ev.data]);
+        setMessages(prev => {
+          const max = Number(maxMessages) > 0 ? Number(maxMessages) : 800;
+          let base = prev;
+          if (base.length >= max) base = base.slice(-max + 1);
+          return [...base, ev.data];
+        });
       };
       wsRef.current.onclose = () => { cleanup(); if (shouldReconnect) schedule(); };
       wsRef.current.onerror = () => { try { wsRef.current.close(); } catch {}; };

@@ -4,24 +4,13 @@ import { openDB } from 'idb';
 
 import { Line } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
 export default function FactionBalanceChart({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });
   const [loading, setLoading] = useState(true);
   const [showChart, setShowChart] = useState(true);
   const [totalIncreases, setTotalIncreases] = useState(null);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
     async function fetchData() {
@@ -57,16 +46,7 @@ export default function FactionBalanceChart({ logsUpdated, darkMode, chartHeight
       }
       setChartData({
         datasets: [
-          {
-            label: 'Balance',
-            data: pts,
-            borderColor: 'rgba(54, 162, 235, 0.9)',
-            backgroundColor: 'rgba(54, 162, 235, 0.3)',
-            pointRadius: 3,
-            showLine: true,
-            fill: false,
-            tension: 0.2,
-          },
+          ds('line', 0, pts, { label: 'Balance', pointRadius: 3, showLine: true, fill: false, tension: 0.2 })
         ],
       });
       // Calcul du total des augmentations (somme des incréments positifs)

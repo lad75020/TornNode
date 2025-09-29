@@ -7,17 +7,6 @@ import { openDB } from 'idb';
 
 import { Bar } from 'react-chartjs-2';
 // InlineStat removed; stats shown via lines
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  LogarithmicScale,
-  BarElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, LogarithmicScale, BarElement, Tooltip, Legend);
 
 export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });

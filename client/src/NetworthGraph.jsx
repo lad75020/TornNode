@@ -2,17 +2,6 @@ import { useEffect, useState, useRef } from 'react';
 import useChartTheme from './useChartTheme.js';
 
 import { Line } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
 import { filterDatasetsByDate } from './dateFilterUtil.js';
 
@@ -20,7 +9,7 @@ export default function NetworthGraph({ darkMode, wsMessages = [], sendWs, dateF
   const [chartData, setChartData] = useState({ datasets: [] });
   const [loading, setLoading] = useState(true);
   const [showChart, setShowChart] = useState(true);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
   const requestedRef = useRef(false);
 
   // Envoi de la requête WebSocket une seule fois
@@ -63,16 +52,7 @@ export default function NetworthGraph({ darkMode, wsMessages = [], sendWs, dateF
               try { onMinDate(labels[0]); } catch {}
             }
             let datasets = [
-              {
-                label: 'Networth',
-                data: values,
-                borderColor: 'rgba(75, 192, 192, 0.9)',
-                backgroundColor: 'rgba(75, 192, 192, 0.3)',
-                pointRadius: 3,
-                showLine: true,
-                fill: false,
-                tension: 0.2,
-              },
+              ds('line', 0, values, { label: 'Networth', pointRadius: 3, showLine: true, fill: false, tension: 0.2 })
             ];
             const filtered = filterDatasetsByDate(labels, datasets, dateFrom, dateTo);
             setChartData(filtered);

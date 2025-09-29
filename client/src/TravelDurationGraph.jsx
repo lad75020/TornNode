@@ -4,17 +4,6 @@ import { computeSeries } from './chartTheme.js';
 import { openDB } from 'idb';
 import { Bar } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 export default function TravelDurationGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [loading, setLoading] = useState(true);

@@ -4,23 +4,13 @@ import useChartTheme from './useChartTheme.js';
 
 import { Bar } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 export default function BloodCountGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });
   const [loading, setLoading] = useState(true);
   const [showChart, setShowChart] = useState(true);
   const [totalWithdrawal, setTotalWithdrawal] = useState(null);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
     const dbName = 'LogsDB';
@@ -95,20 +85,8 @@ export default function BloodCountGraph({ logsUpdated, darkMode, chartHeight = 4
                                 try { onMinDate(sortedDays[0]); } catch {}
                               }
                               let datasets = [
-                                {
-                                  label: 'Deposit',
-                                  data: data2340,
-                                  backgroundColor: 'rgba(54, 162, 235, 0.7)',
-                                  borderColor: 'rgba(54, 162, 235, 1)',
-                                  borderWidth: 1,
-                                },
-                                {
-                                  label: 'Withdrawal',
-                                  data: data2100,
-                                  backgroundColor: 'rgba(255, 99, 132, 0.7)',
-                                  borderColor: 'rgba(255, 99, 132, 1)',
-                                  borderWidth: 1,
-                                },
+                                ds('bar', 0, data2340, { label: 'Deposit', borderWidth: 1 }),
+                                ds('bar', 1, data2100, { label: 'Withdrawal', borderWidth: 1 })
                               ];
                               const filtered = filterDatasetsByDate(sortedDays, datasets, dateFrom, dateTo);
                               setChartData(filtered);

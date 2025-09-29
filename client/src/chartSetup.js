@@ -3,12 +3,16 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
+  LogarithmicScale,
   PointElement,
   LineElement,
   BarElement,
+  ArcElement,
   Tooltip,
   Legend,
   TimeScale,
+  Filler,
+  Title,
   Decimation,
 } from 'chart.js';
 // Time adapter for time scale
@@ -18,12 +22,16 @@ try {
   ChartJS.register(
     CategoryScale,
     LinearScale,
+    LogarithmicScale,
     PointElement,
     LineElement,
     BarElement,
+    ArcElement,
     Tooltip,
     Legend,
     TimeScale,
+    Filler,
+    Title,
     Decimation,
   );
 } catch (_) {
@@ -32,4 +40,3 @@ try {
 
 // no exports needed; side-effect registration only
 export default null;
-

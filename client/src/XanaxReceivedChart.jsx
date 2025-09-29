@@ -5,16 +5,6 @@ import { openDB } from 'idb';
 
 import { Bar } from 'react-chartjs-2';
 // InlineStat removed; stats shown via chart lines
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 export default function XanaxReceivedChart({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });

@@ -3,19 +3,7 @@ import { Bar } from 'react-chartjs-2';
 import { getLogsByLogId } from './dbLayer.js';
 import useChartTheme from './useChartTheme.js';
 import { CHART_HEIGHT } from './chartConstants.js';
-import {
-  Chart as ChartJS,
-  TimeScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
 import 'chartjs-adapter-date-fns';
-
-ChartJS.register(TimeScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
 
 // Chart: log = 8731 (timestamp vs data.position)
 export default function RacingPositionGraph({ logsUpdated, darkMode, chartHeight = CHART_HEIGHT, dateFrom, dateTo, onMinDate }) {
@@ -23,7 +11,7 @@ export default function RacingPositionGraph({ logsUpdated, darkMode, chartHeight
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(true);
   const [granularity, setGranularity] = useState('week'); // 'day' | 'week' | 'month'
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,30 +111,8 @@ export default function RacingPositionGraph({ logsUpdated, darkMode, chartHeight
 
   const data = useMemo(() => ({
     datasets: [
-      {
-        type: 'bar',
-        label: `Avg Position (${granularity})`,
-        data: aggregated.avg,
-        parsing: false,
-        backgroundColor: 'rgba(6, 100, 100, 0.8)',
-        borderColor: 'rgba(1, 90, 90, 1)',
-        borderWidth: 1,
-        barPercentage: 0.9,
-        categoryPercentage: 0.9,
-        yAxisID: 'y',
-      },
-      {
-        type: 'bar',
-        label: `Count (${granularity})`,
-        data: aggregated.counts,
-        parsing: false,
-        backgroundColor: 'rgba(180, 120, 30, 0.65)',
-        borderColor: 'rgba(160, 100, 20, 1)',
-        borderWidth: 1,
-        barPercentage: 0.6,
-        categoryPercentage: 0.6,
-        yAxisID: 'yCount',
-      }
+      ds('bar', 0, aggregated.avg, { label: `Avg Position (${granularity})`, parsing:false, barPercentage:0.9, categoryPercentage:0.9, yAxisID:'y' }),
+      ds('bar', 1, aggregated.counts, { label: `Count (${granularity})`, parsing:false, barPercentage:0.6, categoryPercentage:0.6, yAxisID:'yCount' })
     ]
   }), [aggregated, granularity]);
 

@@ -1,19 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Bar } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
 import useChartTheme from './useChartTheme.js';
 import { filterDatasetsByDate } from './dateFilterUtil.js';
 
-try { ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Tooltip, Legend); } catch {}
+// Chart.js registered globally
 
 /*
   BloodAidDailyChart
@@ -24,7 +14,7 @@ try { ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, Lin
   - Props: { logsUpdated, darkMode, chartHeight, dateFrom, dateTo, onMinDate }
 */
 export default function BloodAidDailyChart({ logsUpdated, darkMode, chartHeight=380, dateFrom, dateTo, onMinDate }) {
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
   const [labels, setLabels] = useState([]);
   const [rawCounts, setRawCounts] = useState({ blood:{}, aid:{} });
   const [loading, setLoading] = useState(true);
@@ -93,34 +83,9 @@ export default function BloodAidDailyChart({ logsUpdated, darkMode, chartHeight=
     }
 
     let datasets = [
-      {
-        type:'bar',
-        label: 'Blood',
-        data: bloodSeries,
-        backgroundColor: 'rgba(220,53,69,0.65)',
-        borderColor: 'rgba(220,53,69,1)',
-        borderWidth: 1,
-        yAxisID: 'yDaily'
-      },
-      {
-        type:'bar',
-        label: 'First Aid Kit',
-        data: aidSeries,
-        backgroundColor: 'rgba(13,110,253,0.65)',
-        borderColor: 'rgba(13,110,253,1)',
-        borderWidth: 1,
-        yAxisID: 'yDaily'
-      },
-      {
-        type:'line',
-  label: 'Cumulative Total',
-        data: totalSeries,
-        borderColor: 'rgba(255,193,7,0.9)',
-        backgroundColor: 'rgba(255,193,7,0.4)',
-        tension: 0.15,
-        pointRadius: 3,
-        yAxisID: 'yTotal'
-      }
+      ds('bar', 0, bloodSeries, { label: 'Blood', borderWidth: 1, yAxisID: 'yDaily' }),
+      ds('bar', 1, aidSeries, { label: 'First Aid Kit', borderWidth: 1, yAxisID: 'yDaily' }),
+      ds('line', 2, totalSeries, { label: 'Cumulative Total', tension: 0.15, pointRadius: 3, yAxisID: 'yTotal' })
     ];
 
     const filtered = filterDatasetsByDate(labels, datasets, dateFrom, dateTo);

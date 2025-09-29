@@ -2,17 +2,6 @@ import { useEffect, useState } from 'react';
 import useChartTheme from './useChartTheme.js';
 import { openDB } from 'idb';
 import { Scatter } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  Tooltip,
-  Legend,
-  LineElement // ...ajout pour le tracé des lignes
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, Tooltip, Legend, LineElement);
 
 // Helper to assign a color to each crime type
 const colorMap = {};
@@ -27,7 +16,7 @@ const getColor = (crime) => {
 export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });
   const [showChart, setShowChart] = useState(true);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
     async function fetchData() {
@@ -57,7 +46,7 @@ export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight =
         if (/^\d{4}-\d{2}-\d{2}$/.test(day)) { try { onMinDate(day); } catch {} }
       }
       // Prepare datasets for each crime with date range filtering (day-based)
-      const datasets = Object.entries(pointsByCrime).map(([crime, points]) => {
+      const datasets = Object.entries(pointsByCrime).map(([crime, points], idx) => {
         // Trier par timestamp pour que la ligne connecte dans l'ordre temporel
         points.sort((a,b) => a.x - b.x);
         const filteredPoints = (dateFrom || dateTo) ? points.filter(p => {
@@ -67,17 +56,16 @@ export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight =
           return true;
         }) : points;
         const color = getColor(crime);
-        return {
+        return ds('scatter', idx, filteredPoints, {
           label: crime,
-          data: filteredPoints,
           backgroundColor: color,
           borderColor: color,
           pointRadius: 4,
-          showLine: true,          // active le tracé entre les points
+          showLine: true,
           borderWidth: 1.5,
-          tension: 0.15,            // légère courbure (mettre 0 pour segments droits)
-          spanGaps: false           // ne relie pas si un point manquant (sécurité)
-        };
+          tension: 0.15,
+          spanGaps: false
+        });
       });
       setChartData({ datasets });
     }

@@ -4,20 +4,6 @@ import useChartTheme from './useChartTheme.js';
 import { getLogsByLogId } from './dbLayer.js';
 import { Bar } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
 export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [data, setData] = useState({ labels: [], counts2290: [], counts2291: [], cumulative2290: [], average2290: 0 });
@@ -25,7 +11,7 @@ export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400
   const [granularity, setGranularity] = useState('daily');
   const [showChart, setShowChart] = useState(true);
   const [totalXanax, setTotalXanax] = useState(null);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
     async function fetchDaily() {
@@ -153,47 +139,10 @@ export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400
             data={{
               labels: data.labels,
               datasets: [
-                {
-                  label: 'Xanax',
-                  data: data.counts2290,
-                  backgroundColor: darkMode ? 'rgba(170,150,255,0.75)' : 'rgba(37, 22, 68, 0.94)',
-                  borderColor: darkMode ? 'rgba(195,175,255,1)' : 'rgba(46, 26, 85, 1)',
-                  borderWidth: 1,
-                },
-                {
-                  label: 'Overdoses',
-                  data: data.counts2291,
-                  backgroundColor: darkMode ? 'rgba(255,120,120,0.85)' : 'rgba(255, 0, 0, 1)',
-                  borderColor: darkMode ? 'rgba(255,150,150,1)' : 'rgba(255,0,0,1)',
-                  borderWidth: 1,
-                },
-                {
-                  type: 'line',
-                  label: 'Average Xanax',
-                  data: data.labels.map(()=> data.average2290),
-                  borderColor: darkMode ? '#66e0ff' : '#0288d1',
-                  backgroundColor: 'transparent',
-                  borderWidth: 2,
-                  borderDash: [6,4],
-                  pointRadius: 0,
-                  tension: 0,
-                  yAxisID: 'y',
-                  order: 2
-                },
-                {
-                  type: 'line',
-                  label: 'Cumulative Xanax',
-                  data: data.cumulative2290,
-                  borderColor: darkMode ? '#ffd666' : '#ff9800',
-                  backgroundColor: darkMode ? 'rgba(255,214,102,0.15)' : 'rgba(255,152,0,0.15)',
-                  borderWidth: 2,
-                  tension: 0.25,
-                  yAxisID: 'y2',
-                  pointRadius: 2,
-                  pointHoverRadius: 4,
-                  fill: true,
-                  order: 3
-                }
+                ds('bar', 0, data.counts2290, { label: 'Xanax', borderWidth: 1 }),
+                ds('bar', 1, data.counts2291, { label: 'Overdoses', borderWidth: 1 }),
+                ds('line', 2, data.labels.map(()=> data.average2290), { label: 'Average Xanax', borderDash:[6,4], pointRadius:0, tension:0, yAxisID:'y', order:2, backgroundColor:'transparent' }),
+                ds('line', 3, data.cumulative2290, { label: 'Cumulative Xanax', tension:0.25, yAxisID:'y2', pointRadius:2, pointHoverRadius:4, fill:true, order:3 })
               ],
             }}
             options={themedOptions({

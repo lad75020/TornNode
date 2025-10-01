@@ -55,6 +55,82 @@ const CompanyDetailsHistoryChart = lazy(() => import('./CompanyDetailsHistoryCha
 const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
+
+// Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
+// and indexes "log" and "timestamp". If it already exists, do nothing.
+(function ensureLogsDB() {
+  try {
+    const idb = window.indexedDB || window.mozIndexedDB || window.webkitIndexedDB || window.msIndexedDB;
+    if (!idb) { console.warn('[LogsDB] IndexedDB not supported'); return; }
+
+    const createDB = () => {
+      try {
+        const req = idb.open('LogsDB', 1);
+        req.onupgradeneeded = function (event) {
+          const db = event.target.result;
+          const tx = event.target.transaction;
+          let store;
+          if (!db.objectStoreNames.contains('logs')) {
+            store = db.createObjectStore('logs', { keyPath: '_id' });
+          } else {
+            try { store = tx.objectStore('logs'); } catch (_) { /* ignore */ }
+          }
+          if (store) {
+            if (!store.indexNames.contains('log')) {
+              store.createIndex('log', 'log', { unique: false });
+            }
+            if (!store.indexNames.contains('timestamp')) {
+              store.createIndex('timestamp', 'timestamp', { unique: false });
+            }
+          }
+        };
+        req.onsuccess = (e) => { try { e.target.result.close(); } catch(_) {} };
+        req.onerror = (e) => { console.error('[LogsDB] open/create error:', e.target?.error || e); };
+      } catch (err) {
+        console.error('[LogsDB] create error:', err);
+      }
+    };
+
+    if (typeof idb.databases === 'function') {
+      // Modern check: list databases to see if LogsDB already exists
+      idb.databases().then((dbs) => {
+        const exists = Array.isArray(dbs) && dbs.some((d) => d && d.name === 'LogsDB');
+        if (!exists) {
+          createDB();
+        } else {
+          // Optional shape check (no migration): warn if schema differs
+          const req = idb.open('LogsDB');
+          req.onsuccess = (ev) => {
+            const db = ev.target.result;
+            try {
+              if (!db.objectStoreNames.contains('logs')) {
+                console.warn('[LogsDB] DB exists but store "logs" is missing');
+              } else {
+                const tx = db.transaction('logs', 'readonly');
+                const store = tx.objectStore('logs');
+                const keyPath = store.keyPath;
+                const names = store.indexNames;
+                const hasLog = names && names.contains('log');
+                const hasTs = names && names.contains('timestamp');
+                if (keyPath !== '_id' || !hasLog || !hasTs) {
+                  console.warn('[LogsDB] Existing schema differs', { keyPath, indexes: Array.from(names || []) });
+                }
+              }
+            } catch (_) { /* ignore */ }
+            try { db.close(); } catch(_) {}
+          };
+          req.onerror = () => { /* ignore */ };
+        }
+      }).catch(() => {
+        // Fallback: try to create (safe if it already exists; no upgrade will run)
+        createDB();
+      });
+    } else {
+      // Fallback for browsers without indexedDB.databases()
+      createDB();
+    }
+  } catch (_) { /* ignore */ }
+})();
 // ChartSlider doit être défini hors de Main
 const ChartSlider = memo(function ChartSlider({ token, logsUpdated, wsRef, wsMessages, sendWs, darkMode, slider, dateFrom, dateTo, onMinDate }) {
   const navigate = useNavigate();

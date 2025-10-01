@@ -142,7 +142,7 @@ export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400
                 ds('bar', 0, data.counts2290, { label: 'Xanax', borderWidth: 1 }),
                 ds('bar', 1, data.counts2291, { label: 'Overdoses', borderWidth: 1 }),
                 ds('line', 2, data.labels.map(()=> data.average2290), { label: 'Average Xanax', borderDash:[6,4], pointRadius:0, tension:0, yAxisID:'y', order:2, backgroundColor:'transparent' }),
-                ds('line', 3, data.cumulative2290, { label: 'Cumulative Xanax', tension:0.25, yAxisID:'y2', pointRadius:2, pointHoverRadius:4, fill:true, order:3 })
+                ds('line', 3, data.cumulative2290, { label: 'Cumulative Xanax', tension:0.25, yAxisID:'y2', pointRadius:2, pointHoverRadius:4, fill:false, order:3 })
               ],
             }}
             options={themedOptions({

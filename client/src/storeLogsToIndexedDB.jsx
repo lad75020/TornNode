@@ -1,5 +1,4 @@
 import { openDB } from 'idb';
-import { pushOrReplaceToast } from './toastBus.js';
 
 // Gardes globales anti-boucle pour ingestion logs (évite relances infinies)
 let __logsIngestActive = false;
@@ -52,36 +51,6 @@ export function handleStoreLogs(setStoreProgress, { ws, send, requestId: externa
     let finished = false;
     let lastProgressTs = Date.now();
 
-    const toastKey = 'store-logs-progress';
-    function pushProgressToast({ percent, done }) {
-      try {
-        if (done) {
-          // Toast final avec TTL court pour auto-fermeture
-          pushOrReplaceToast({
-            key: toastKey,
-            replace: true,
-            ttl: 4500,
-            kind: 'success',
-            title: 'Stockage Logs',
-            body: `Terminé 100% – ${current} logs stockés`
-          });
-        } else {
-          const pct = typeof percent === 'number' ? percent.toFixed(1) : '0.0';
-            pushOrReplaceToast({
-              key: toastKey,
-              replace: true,
-              ttl: 60000, // renouvelé à chaque batch; remplacé par final court
-              kind: 'info',
-              title: 'Stockage Logs',
-              body: `${pct}% (${current}/${expectedTotal || '?'})`
-            });
-        }
-      } catch {}
-    }
-
-    // Pré-toast initial (avant réponse start au cas où lenteur serveur)
-    pushProgressToast({ percent: 0, done: false });
-
     function finalize() {
       if (!finished) { finished = true; }
       setStoreProgress(prev => {
@@ -95,8 +64,6 @@ export function handleStoreLogs(setStoreProgress, { ws, send, requestId: externa
       __logsIngestActive = false;
       __lastLogsIngestEnd = Date.now();
       __lastLogsIngestHadData = current > 0;
-      // Toast final (si pas déjà poussé par guard / end)
-      pushProgressToast({ percent: 100, done: true });
     }
 
     const scheduleClear = () => {};
@@ -117,7 +84,6 @@ export function handleStoreLogs(setStoreProgress, { ws, send, requestId: externa
           cleanup(); scheduleClear();
         } else {
           setStoreProgress({ current:0,total:expectedTotal,percent:0,running:true });
-          pushProgressToast({ percent: 0, done: false });
         }
         return;
       }
@@ -137,10 +103,6 @@ export function handleStoreLogs(setStoreProgress, { ws, send, requestId: externa
           const complete = expectedTotal && current >= expectedTotal;
           return { current, total: expectedTotal, percent: pct, running: !complete };
         });
-        if (expectedTotal) {
-          const pctNum = expectedTotal ? (current / expectedTotal * 100) : 0;
-          pushProgressToast({ percent: pctNum, done: false });
-        }
         return;
       }
       if (parsed.phase === 'end') { finalize(); cleanup(); return; }

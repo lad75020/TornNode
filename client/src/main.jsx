@@ -350,9 +350,8 @@ function Main() {
   const [logsUpdated, setLogsUpdated] = useState(false);
   const [logsImportedCount, setLogsImportedCount] = useState(0);
   const [attacksImportedCount, setAttacksImportedCount] = useState(0);
-  // Refs pour gestion toast final import logs
+  // Refs pour gestion import logs
   const logsImportCompletedRef = useRef(false); // devient true quand progress logs atteint 100%
-  const logsCountShownRef = useRef(0); // dernier count affiché dans le toast
   // Refs pour gestion toast final import attacks
   const attacksImportCompletedRef = useRef(false);
   const attacksCountShownRef = useRef(0);
@@ -423,58 +422,34 @@ function Main() {
       if (kind === 'logs') {
         setLogsImportPercent(percentNum);
       }
-      const logsCountSuffix = (kind === 'logs' && percentNum >= 100 && logsImportedCount > 0)
-        ? ` – ${logsImportedCount} logs`
-        : '';
       const attacksCountSuffix = (kind === 'attacks' && percentNum >= 100 && attacksImportedCount > 0)
         ? ` – ${attacksImportedCount} attacks`
         : '';
-      pushOrReplaceToast({
-        key: `import-${kind}`,
-        replace: true,
-        ttl,
-        kind: percentNum >= 100 ? 'success' : 'info',
-        title,
-        body: `${percentNum.toFixed(1)}% (${kind})${percentNum >= 100 ? ' Terminé' : ''}${logsCountSuffix}${attacksCountSuffix}`,
-        raw: null
-      });
-      if (percentNum >= 100) {
-        setTimeout(() => {
-          const finalLogsSuffix = (kind === 'logs' && logsImportedCount > 0)
-            ? ` – ${logsImportedCount} logs`
-            : '';
-          const finalAttacksSuffix = (kind === 'attacks' && attacksImportedCount > 0)
-            ? ` – ${attacksImportedCount} attacks`
-            : '';
-            if (kind === 'logs' && logsImportedCount > 0) {
-              logsCountShownRef.current = logsImportedCount;
-            }
+      if (kind !== 'logs') {
+        pushOrReplaceToast({
+          key: `import-${kind}`,
+          replace: true,
+          ttl,
+          kind: percentNum >= 100 ? 'success' : 'info',
+          title,
+          body: `${percentNum.toFixed(1)}% (${kind})${percentNum >= 100 ? ' Terminé' : ''}${attacksCountSuffix}`,
+          raw: null
+        });
+        if (percentNum >= 100) {
+          setTimeout(() => {
+            const finalAttacksSuffix = (kind === 'attacks' && attacksImportedCount > 0)
+              ? ` – ${attacksImportedCount} attacks`
+              : '';
             if (kind === 'attacks' && attacksImportedCount > 0) {
               attacksCountShownRef.current = attacksImportedCount;
             }
-          pushOrReplaceToast({ key: `import-${kind}`, replace: true, ttl: 4000, kind: 'success', title, body: `Terminé 100%${finalLogsSuffix}${finalAttacksSuffix}` });
-        }, 300);
+            pushOrReplaceToast({ key: `import-${kind}`, replace: true, ttl: 4000, kind: 'success', title, body: `Terminé 100%${finalAttacksSuffix}` });
+          }, 300);
+        }
       }
     }
     lastProcessedProgressIdxRef.current = wsMain.messages.length;
   }, [wsMain.messages]);
-
-  // Dès que le nombre total de logs importés (importedData) est connu après completion, rafraîchir le toast si nécessaire
-  useEffect(() => {
-    if (!logsImportCompletedRef.current) return; // pas encore fini
-    if (logsImportedCount <= 0) return; // pas de compte
-    if (logsCountShownRef.current === logsImportedCount) return; // déjà affiché
-    // Mettre à jour le toast existant sans reset du TTL si possible (on remet un TTL court pour s'assurer fermeture propre)
-    pushOrReplaceToast({
-      key: 'import-logs',
-      replace: true,
-      ttl: 5000,
-      kind: 'success',
-      title: 'Import Logs',
-      body: `Terminé 100% – ${logsImportedCount} logs`
-    });
-    logsCountShownRef.current = logsImportedCount;
-  }, [logsImportedCount]);
 
   // Rafraîchir toast attacks après réception du nombre total
   useEffect(() => {
@@ -561,17 +536,15 @@ function Main() {
 
   // Auto-trigger importedData désactivé (obsolete / provoquait ré-entrées)
 
-  // --- Manual Logs Sync (wsGetAllTornLogs) avec état + throttling toasts ---
+  // --- Manual Logs Sync (wsGetAllTornLogs) avec suivi d'état ---
   const [manualLogsSync, setManualLogsSync] = useState({ active:false, requestId:null, sent:0, total:0, pct:0 });
   const manualLogsSyncRef = useRef(manualLogsSync);
   useEffect(()=>{ manualLogsSyncRef.current = manualLogsSync; }, [manualLogsSync]);
-  const lastManualToastRef = useRef({ pct:-10, time:0 });
   const handleManualLogsSync = useCallback(() => {
     if (wsMain.status !== 'open') return;
     if (manualLogsSyncRef.current.active) return;
     // Cooldown local (évite double-clic spam)
     if (manualLogsSyncRef.current._lastEnd && Date.now() - manualLogsSyncRef.current._lastEnd < 16000) {
-      pushToast({ kind:'info', title:'Logs', body:'Veuillez attendre un court instant avant une nouvelle sync.' });
       return;
     }
     const requestId = 'mls_'+Date.now().toString(36);
@@ -586,12 +559,8 @@ function Main() {
     setManualLogsSync({ active:true, requestId, sent:0, total:0, pct:0 });
     try {
       wsMain.send(JSON.stringify({ type:'getAllTornLogs', from, to, batchSize:1000, requestId }));
-      lastManualToastRef.current = { pct:0, time:Date.now() };
-          // Toast persistant (pas de TTL) jusqu'à fin / erreur
-          pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:'Sync manuelle démarrée…', persistent:true });
     } catch(e) {
       setManualLogsSync({ active:false, requestId:null, sent:0, total:0, pct:0 });
-      pushToast({ kind:'error', title:'Logs', body:'Échec envoi requête', raw:{ error:e.message } });
     }
   }, [wsMain.status, wsMain.send, dateFrom, dateTo]);
 
@@ -631,32 +600,23 @@ function Main() {
     },
     onManualLogs: (parsed) => {
       if (parsed.error === 'cooldown' && parsed.phase === 'ignored') {
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:`Cooldown (${Math.ceil((parsed.remaining||0)/1000)}s)` , ttl:4000 });
         return;
       } else if (parsed.phase === 'ignored') {
         return;
       } else if (parsed.phase === 'start') {
         setManualLogsSync(s => ({ ...s, total: parsed.total||0, sent:0, pct:0 }));
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:`Début sync (${parsed.total} logs)…`, persistent:true });
       } else if (parsed.phase === 'batch') {
         const pct = parsed.total ? Math.min(100, Math.round(parsed.sent/parsed.total*100)) : 100;
         if (pct !== manualLogsSyncRef.current.pct) {
           setManualLogsSync(s => ({ ...s, sent: parsed.sent, total: parsed.total||s.total, pct }));
         }
-        const now = Date.now();
-        if ((pct - lastManualToastRef.current.pct >= 5) || (now - lastManualToastRef.current.time > 4000) || pct >= 100) {
-          lastManualToastRef.current = { pct, time: now };
-          pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:`${parsed.sent}/${parsed.total} (${pct}%)`, persistent:true });
-        }
       } else if (parsed.phase === 'end') {
         const pct = parsed.total ? Math.min(100, Math.round(parsed.sent/parsed.total*100)) : 100;
         setManualLogsSync(s => ({ ...s, sent: parsed.sent, total: parsed.total||s.total, pct, active:false }));
         manualLogsSyncRef.current._lastEnd = Date.now();
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'success', title:'Logs', body:`Terminé: ${parsed.sent}/${parsed.total} (${pct}%)`, ttl:8000 });
         handleStoreLogsAndRefresh(setStoreProgress);
       } else if (parsed.ok === false && parsed.error) {
         setManualLogsSync(s => ({ ...s, active:false }));
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'error', title:'Logs', body:`Erreur: ${parsed.error}`, ttl:8000 });
       }
     },
     onImportStopped: (parsed) => {
@@ -664,14 +624,16 @@ function Main() {
       if (k) {
         canceledImportsRef.current[k] = true;
         const pct = lastImportPercentRef.current[k] ?? 0;
-        pushOrReplaceToast({
-          key:`import-${k}`,
-          replace:true,
-          ttl:6000,
-          kind:'warning',
-          title: k === 'logs' ? 'Import Logs' : (k === 'attacks' ? 'Import Attacks' : 'Import'),
-          body:`Annulé à ${pct.toFixed ? pct.toFixed(1) : pct}%`
-        });
+        if (k !== 'logs') {
+          pushOrReplaceToast({
+            key:`import-${k}`,
+            replace:true,
+            ttl:6000,
+            kind:'warning',
+            title: k === 'attacks' ? 'Import Attacks' : 'Import',
+            body:`Annulé à ${pct.toFixed ? pct.toFixed(1) : pct}%`
+          });
+        }
       } else {
         pushToast({ kind:'warning', title:'Import', body:'Import stoppé', raw:parsed });
       }

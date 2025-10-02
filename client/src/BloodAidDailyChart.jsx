@@ -83,8 +83,8 @@ export default function BloodAidDailyChart({ logsUpdated, darkMode, chartHeight=
     }
 
     let datasets = [
-      ds('bar', 0, bloodSeries, { label: 'Blood', borderWidth: 1, yAxisID: 'yDaily' }),
-      ds('bar', 1, aidSeries, { label: 'First Aid Kit', borderWidth: 1, yAxisID: 'yDaily' }),
+      ds('bar', 1, bloodSeries, { label: 'Blood', borderWidth: 1, yAxisID: 'yDaily' }),
+      ds('bar', 0, aidSeries, { label: 'First Aid Kit', borderWidth: 1, yAxisID: 'yDaily' }),
       ds('line', 2, totalSeries, { label: 'Cumulative Total', tension: 0.15, pointRadius: 3, yAxisID: 'yTotal' })
     ];
 

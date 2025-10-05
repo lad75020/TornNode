@@ -111,6 +111,15 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, 
     });
   }, [lines, dateFrom, dateTo]);
 
+  // Liste triée alphabétiquement pour le menu déroulant (ne change pas l'ordre des séries)
+  const sortedItems = useMemo(() => {
+    return prepared.slice().sort((a, b) => {
+      const an = a.name || String(a.id);
+      const bn = b.name || String(b.id);
+      return an.localeCompare(bn, undefined, { sensitivity: 'base' });
+    });
+  }, [prepared]);
+
   // Appliquer le filtre d'item sélectionné (ne garder qu'une ligne)
   const displayed = useMemo(() => {
     if (!selectedId) return prepared.slice(0,1); // fallback première série
@@ -206,7 +215,7 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, 
           onChange={e => setSelectedId(e.target.value || null)}
           style={{ fontSize:11, padding:'2px 4px', maxWidth:240 }}
         >
-          {prepared.map(l => (
+          {sortedItems.map(l => (
             <option key={l.id} value={l.id}>{l.name || l.id}</option>
           ))}
         </select>

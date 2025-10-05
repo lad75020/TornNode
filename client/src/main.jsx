@@ -25,6 +25,7 @@ import ToastHost from './ToastHost.jsx';
 // Enregistrement global Chart.js pour éviter les erreurs "point/line/bar is not registered"
 import './chartSetup.js';
 const Autocomplete = lazy(() => import('./Autocomplete.jsx'));
+const ItemsTypeDropdown = lazy(() => import('./ItemsTypeDropdown.jsx'));
 import { handleStoreLogs } from './storeLogsToIndexedDB.jsx';
 import { writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
 const LogsGraph = lazy(() => import('./LogsGraph.jsx'));
@@ -888,7 +889,7 @@ function Main() {
           onClick={() => setShowAutocomplete(false)}
         >
           <div
-            className="modal-dialog"
+            className="modal-dialog modal-lg"
             onClick={e => e.stopPropagation()}
           >
             <div className="modal-content">
@@ -897,17 +898,22 @@ function Main() {
                 <button type="button" className="btn-close" onClick={() => setShowAutocomplete(false)}></button>
               </div>
               <div className="modal-body">
-                {/* Suspense wrapper ajouté pour chargement lazy de Autocomplete */}
-                <Suspense fallback={<div><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '80px' }} /></div>}>
-                  <Autocomplete
-                    token={token}
-                    watchedItems={watchedItems}
-                    onWatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'watch', itemId })); } catch {} }}
-                    onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
-                    sendWs={sendWithPulse}
-                    wsMessages={wsMain.messages}
-                  />
-                </Suspense>
+                <div className="d-flex align-items-start" style={{ gap: 16 }}>
+                  {/* Suspense wrapper pour chargement lazy de Autocomplete */}
+                  <Suspense fallback={<div><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '80px' }} /></div>}>
+                    <Autocomplete
+                      token={token}
+                      watchedItems={watchedItems}
+                      onWatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'watch', itemId })); } catch {} }}
+                      onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
+                      sendWs={sendWithPulse}
+                      wsMessages={wsMain.messages}
+                    />
+                  </Suspense>
+                  <Suspense fallback={<div style={{ minWidth: 220, textAlign: 'center' }}><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '60px' }} /></div>}>
+                    <ItemsTypeDropdown wsMessages={wsMain.messages} />
+                  </Suspense>
+                </div>
               </div>
             </div>
           </div>

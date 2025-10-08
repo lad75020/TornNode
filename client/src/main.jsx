@@ -293,6 +293,7 @@ function Main() {
   // Slider
   const slider = useChartSlider(chartComponents.length);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [selectedItemType, setSelectedItemType] = useState('');
 
   const handleToggleTheme = cycleTheme;
 
@@ -908,10 +909,15 @@ function Main() {
                       onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
                       sendWs={sendWithPulse}
                       wsMessages={wsMain.messages}
+                      filterType={selectedItemType}
                     />
                   </Suspense>
                   <Suspense fallback={<div style={{ minWidth: 220, textAlign: 'center' }}><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '60px' }} /></div>}>
-                    <ItemsTypeDropdown wsMessages={wsMain.messages} />
+                    <ItemsTypeDropdown
+                      wsMessages={wsMain.messages}
+                      value={selectedItemType}
+                      onTypeChange={setSelectedItemType}
+                    />
                   </Suspense>
                 </div>
               </div>

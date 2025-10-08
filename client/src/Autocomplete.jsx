@@ -5,7 +5,7 @@ import { refreshPriceViaWs, handleUpdatePriceMessage } from './UpdatePrice.jsx';
 import useWsMessageBus from './hooks/useWsMessageBus.js';
 
 
-function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], sendWs, wsMessages }) {
+function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], sendWs, wsMessages, filterType = '' }) {
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState('');
   const [filtered, setFiltered] = useState([]);
@@ -53,6 +53,14 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
   }, [query]);
 
   useEffect(() => {
+    // If a type is selected, show all items of that type (ignore query)
+    const t = (filterType || '').trim();
+    if (t) {
+      const out = items.filter(it => (it && typeof it.type === 'string' && it.type.trim() === t));
+      setFiltered(out);
+      return;
+    }
+    // Otherwise, fall back to query-based filtering
     const q = debouncedQuery;
     if (!q) { setFiltered(items.slice(0, 300)); return; }
     const out = items.filter(item => {
@@ -60,7 +68,7 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
       return name.toLowerCase().startsWith(q);
     });
     setFiltered(out);
-  }, [debouncedQuery, items]);
+  }, [debouncedQuery, items, filterType]);
 
   // Écoute des messages WS via bus
   useWsMessageBus(wsMessages, {
@@ -89,12 +97,12 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
         placeholder="Rechercher..."
         style={{ padding: 8, width: 200 }}
       />
-      {query && (
+      {(query || (filterType && filterType.trim())) && (
         <ul style={{ color: 'black',border: '1px solid #ccc', padding: 0, margin: 0, width: 200, position: 'absolute', background: '#fff', zIndex: 1, maxHeight:300, overflowY:'auto' }}>
           {filtered.length === 0 && (
             <li style={{ listStyle:'none', padding:8, fontStyle:'italic', opacity:0.6 }}>Aucun résultat</li>
           )}
-          {filtered.slice(0, 300).map(item => (
+          {(filterType ? filtered : filtered.slice(0, 300)).map(item => (
             <li
               key={item.id}
               style={{ listStyle: 'none', padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
@@ -154,7 +162,7 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
               </button>
             </li>
           ))}
-          {filtered.length > 300 && (
+          {!filterType && filtered.length > 300 && (
             <li style={{ listStyle:'none', padding:6, fontSize:11, color:'#555' }}>Showing first 300 of {filtered.length}</li>
           )}
         </ul>

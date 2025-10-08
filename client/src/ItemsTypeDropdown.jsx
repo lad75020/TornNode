@@ -8,9 +8,9 @@ import useWsMessageBus from './hooks/useWsMessageBus.js';
  *  - wsMessages?: string[] (optional, for live update on getAllTornItems)
  *  - onTypeChange?: (type: string) => void
  */
-export default function ItemsTypeDropdown({ wsMessages, onTypeChange }) {
+export default function ItemsTypeDropdown({ wsMessages, onTypeChange, value }) {
   const [types, setTypes] = useState([]);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(value || '');
 
   const computeTypes = (arr) => {
     try {
@@ -23,6 +23,7 @@ export default function ItemsTypeDropdown({ wsMessages, onTypeChange }) {
       setTypes(out);
       if (out.length > 0 && selected && !out.includes(selected)) {
         setSelected('');
+        try { onTypeChange && onTypeChange(''); } catch {}
       }
     } catch {
       setTypes([]);
@@ -38,6 +39,13 @@ export default function ItemsTypeDropdown({ wsMessages, onTypeChange }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Keep local selected in sync if parent controls value
+  useEffect(() => {
+    if (typeof value !== 'undefined' && value !== selected) {
+      setSelected(value || '');
+    }
+  }, [value]);
 
   // Listen to localStorage sync marker to refresh across tabs/updates
   useEffect(() => {
@@ -81,4 +89,3 @@ export default function ItemsTypeDropdown({ wsMessages, onTypeChange }) {
     </div>
   );
 }
-

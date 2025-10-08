@@ -41,12 +41,12 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch Log Inserter",
+            "name": "COmpare Items in Display",
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/fetchLogsAndFillMongo.cjs",
-            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.5.0/bin/node"
+            "program": "${workspaceFolder}/scripts/compareClothingItems.js",
+            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.8.0/bin/node"
         }
     ]
 }

@@ -23,7 +23,7 @@ export async function writeItemsToIndexedDB(items) {
     const store = tx.store;
     await store.clear();
     for (const it of items) {
-      if (it && typeof it.id !== 'undefined') await store.put(it);
+      if (it && typeof it.id !== 'undefined') store.put(it);
     }
     await tx.done;
     try { localStorage.setItem('itemsLastSync', Date.now().toString()); } catch(_) {}

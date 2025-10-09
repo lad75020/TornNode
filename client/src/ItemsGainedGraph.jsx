@@ -6,19 +6,6 @@ import { getLogsByLogId } from './dbLayer.js';
 import { getAllItemsFromIDB } from './syncItemsToIndexedDB.js';
 import { Bar } from 'react-chartjs-2';
 import useBarBucketModal from './hooks/useBarBucketModal.js';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend);
 
 // Refactor : utilisation du hook générique useBarBucketModal pour DRY la logique d'agrégation & modale
 export default function ItemsGainedGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {

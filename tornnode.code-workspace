@@ -9,7 +9,14 @@
 			"**/node_modules": true,
 			"**/.git": true,
 			"**/.DS_Store": true
-		}
+		},
+		"githubPullRequests.remotes": [
+			"origin",
+			"upstream",
+			"tornhub"
+		],
+		"chatgpt.openOnStartup": true,
+		"editor.defaultFormatter": "GitHub.copilot"
 	},
 
 }

@@ -1,23 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
-import {
-  Chart as ChartJS,
-  BarElement,
-  LinearScale,
-  TimeScale,
-  Tooltip,
-  Legend,
-  CategoryScale,
-} from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { Bar } from 'react-chartjs-2';
 import { openDB } from 'idb';
-import { applyCommonChartOptions } from './chartTheme.js';
+import useChartTheme from './useChartTheme.js';
 
 // NOTE (memory entity): frontend-component PokerBetWinGraph uses_util indexeddb (openDB) & chartTheme.
 // Pattern: simple IndexedDB scan filtering by title substring 'poker'. If this component becomes central,
 // update memory graph via `npm run memory:entities` and `npm run memory:relations`.
 
-ChartJS.register(BarElement, LinearScale, TimeScale, Tooltip, Legend, CategoryScale);
+// Chart.js registered globally (time scale included)
 
 /**
  * PokerBetWinGraph
@@ -32,6 +23,7 @@ export default function PokerBetWinGraph({ darkMode, chartHeight = 400, dateFrom
   const [showChart, setShowChart] = useState(true);
   // Always aggregated daily now (toggle removed)
   const fetchedRef = useRef(false);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   // Helper: date range filter (inclusive) if provided (YYYY-MM-DD)
   function inRange(dateObj) {
@@ -116,42 +108,13 @@ export default function PokerBetWinGraph({ darkMode, chartHeight = 400, dateFrom
 
   const data = {
     datasets: [
-      {
-        type: 'bar',
-        label: 'Bet Amount',
-        data: betPoints,
-        backgroundColor: colorBet,
-        borderColor: colorBetBorder,
-        borderWidth: 1,
-        yAxisID: 'y',
-        parsing: true,
-      },
-      {
-        type: 'bar',
-        label: 'Won Amount',
-        data: wonPoints,
-        backgroundColor: colorWon,
-        borderColor: colorWonBorder,
-        borderWidth: 1,
-        yAxisID: 'y',
-        parsing: true,
-      },
-      {
-        type: 'line',
-        label: 'Profit (Win - Bet)',
-        data: profitPoints,
-        borderColor: colorProfit,
-        backgroundColor: colorProfit,
-        borderWidth: 2,
-        pointRadius: 2,
-        tension: 0.15,
-        yAxisID: 'y',
-        parsing: true,
-      }
+      ds('bar', 0, betPoints, { label: 'Bet Amount', yAxisID: 'y', parsing: true, backgroundColor: colorBet, borderColor: colorBetBorder, borderWidth: 1 }),
+      ds('bar', 1, wonPoints, { label: 'Won Amount', yAxisID: 'y', parsing: true, backgroundColor: colorWon, borderColor: colorWonBorder, borderWidth: 1 }),
+      ds('line', 2, profitPoints, { label: 'Profit (Win - Bet)', yAxisID: 'y', parsing: true, borderColor: colorProfit, backgroundColor: colorProfit, borderWidth: 2, pointRadius: 2, tension: 0.15 }),
     ]
   };
 
-  const options = applyCommonChartOptions({
+  const options = themedOptions({
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
@@ -171,7 +134,7 @@ export default function PokerBetWinGraph({ darkMode, chartHeight = 400, dateFrom
       legend: { display: true },
       tooltip: { enabled: true },
     }
-  }, darkMode);
+  });
 
   return (
     <div

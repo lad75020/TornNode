@@ -4,17 +4,7 @@ import { openDB } from 'idb';
 
 import { Line } from 'react-chartjs-2';
 import 'chartjs-adapter-date-fns';
-import{
-  Chart as ChartJS,
-  TimeScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(TimeScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
+// Chart.js and time scale registered globally
 
 export default function GymGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });

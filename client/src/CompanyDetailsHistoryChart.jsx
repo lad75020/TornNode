@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, TimeScale } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import useChartTheme from './useChartTheme.js';
-
-try { ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, TimeScale); } catch {}
+import useWsMessageBus from './hooks/useWsMessageBus.js';
 
 /*
   CompanyDetailsHistoryChart (squelette)
@@ -13,33 +11,24 @@ try { ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, To
   - Fournit une prop optionnelle mapToDatasets(series) => datasets[] pour brancher facilement la représentation.
 */
 export default function CompanyDetailsHistoryChart({ wsRef, wsMessages, sendWs, darkMode, chartHeight = 360, mapToDatasets }) {
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
   const [series, setSeries] = useState(null);
   const [meta, setMeta] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const lastQueryRef = useRef({ from:null, to:null });
 
-  // Ecoute des messages WS (bruts, strings JSON)
-  useEffect(() => {
-    if (!wsMessages || !wsMessages.length) return;
-    const slice = wsMessages.slice(-40);
-    for (let i = slice.length - 1; i >= 0; i--) {
-      const raw = slice[i];
-      if (!raw || raw[0] !== '{') continue;
-      let parsed; try { parsed = JSON.parse(raw); } catch { continue; }
-      if (!parsed) continue;
-      if (parsed.type === 'getCompanyDetailsHistory') {
-        if (parsed.ok) {
-          setSeries(parsed.series || null);
-          setMeta({ ...(parsed.meta || {}), lastTimestamp: parsed.lastTimestamp });
-          setError(null);
-        } else setError(parsed.error || 'error');
-        setLoading(false);
-        break;
-      }
+  // Ecoute des messages via bus
+  useWsMessageBus(wsMessages, {
+    onCompanyDetailsHistory: (parsed) => {
+      if (parsed.ok) {
+        setSeries(parsed.series || null);
+        setMeta({ ...(parsed.meta || {}), lastTimestamp: parsed.lastTimestamp });
+        setError(null);
+      } else setError(parsed.error || 'error');
+      setLoading(false);
     }
-  }, [wsMessages]);
+  });
 
   const loadHistory = (opts = {}) => {
     if (!wsRef || !wsRef.current || wsRef.current.readyState !== 1) return;
@@ -68,14 +57,15 @@ export default function CompanyDetailsHistoryChart({ wsRef, wsMessages, sendWs, 
     for (const k of keys) {
       const arr = series[k];
       if (!Array.isArray(arr) || !arr.length) continue;
-      out.push({
-        label: k[0].toUpperCase()+k.slice(1),
-        data: arr.map(p => ({ x: p.t, y: p.v })),
-        borderColor: palette[k] || '#888888',
-        backgroundColor: palette[k] || '#888888',
-        pointRadius: 0,
-        tension: 0.15
-      });
+      out.push(
+        ds('line', out.length, arr.map(p => ({ x: p.t, y: p.v })), {
+          label: k[0].toUpperCase()+k.slice(1),
+          pointRadius: 0,
+          tension: 0.15,
+          borderColor: palette[k] || undefined,
+          backgroundColor: palette[k] || undefined,
+        })
+      );
     }
     return out;
   }, [series, mapToDatasets]);

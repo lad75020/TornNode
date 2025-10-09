@@ -1,10 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { Bar } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend, TimeScale } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import useChartTheme from './useChartTheme.js';
-
-try { ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend, TimeScale); } catch {}
+import useWsMessageBus from './hooks/useWsMessageBus.js';
 
 /*
  Flux simplifié:
@@ -18,50 +16,35 @@ export default function CompanyStockChart({ wsRef, wsMessages, sendWs, darkMode,
   const [lastError, setLastError] = useState(null);
   const [loading, setLoading] = useState(false);
   const lastRequestRef = useRef(0);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
-  // Ecoute des messages WS pour récupérer companyStock (fetch + insert)
-  useEffect(() => {
-    if (!wsMessages || !wsMessages.length) return;
-    // Traiter uniquement les nouveaux messages
-    const slice = wsMessages.slice(-30); // fenêtre récente suffisante
-    for (let i = slice.length - 1; i >= 0; i--) {
-      const raw = slice[i];
-      if (!raw || raw[0] !== '{') continue;
-      let parsed; try { parsed = JSON.parse(raw); } catch { continue; }
-      if (!parsed) continue;
-      if (parsed.type === 'companyStock') {
-        if (parsed.ok) {
-           let rows = [];
-          if (Array.isArray(parsed.stock)) {
-            rows = parsed.stock.map((v,i) => ({
-              ...v,
-              name: v?.name || v?.item || v?.item_name || `item_${i}`
-            }));
-          } else if (parsed.stock && typeof parsed.stock === 'object') {
-            try {
-              rows = Object.entries(parsed.stock).map(([key, v], i) => ({
-                ...v,
-                name: v?.name || v?.item || v?.item_name || key || `item_${i}`
-              }));
-            } catch { rows = []; }
-          }
-          // Tri optionnel par sold_worth desc si présent
+  // Ecoute des messages WS via bus
+  useWsMessageBus(wsMessages, {
+    onCompanyStock: (parsed) => {
+      if (parsed.ok) {
+        let rows = [];
+        if (Array.isArray(parsed.stock)) {
+          rows = parsed.stock.map((v,i) => ({
+            ...v,
+            name: v?.name || v?.item || v?.item_name || `item_${i}`
+          }));
+        } else if (parsed.stock && typeof parsed.stock === 'object') {
           try {
-            rows.sort((a,b) => (b?.sold_worth||0) - (a?.sold_worth||0));
-          } catch {}
-          
-          //rows.name = parsed.name || null;
-          setDataRows(rows);
-          setLastError(null);
-        } else if (parsed.error) {
-          setLastError(parsed.error);
+            rows = Object.entries(parsed.stock).map(([key, v], i) => ({
+              ...v,
+              name: v?.name || v?.item || v?.item_name || key || `item_${i}`
+            }));
+          } catch { rows = []; }
         }
-        setLoading(false);
-        break;
+        try { rows.sort((a,b) => (b?.sold_worth||0) - (a?.sold_worth||0)); } catch {}
+        setDataRows(rows);
+        setLastError(null);
+      } else if (parsed.error) {
+        setLastError(parsed.error);
       }
+      setLoading(false);
     }
-  }, [wsMessages]);
+  });
 
   // Chargement initial + refresh utilisent le même message companyStock
   const loadInitial = () => {
@@ -113,21 +96,9 @@ export default function CompanyStockChart({ wsRef, wsMessages, sendWs, darkMode,
   // Construire trois datasets distincts (facile à étendre si on veut empiler historiques plus tard)
   const chartData = {
     datasets: [
-      {
-        label: 'In Stock',
-        data: [{ x: lastTs, y: metricTriplet.in_stock }],
-        backgroundColor: 'rgba(54,162,235,0.7)'
-      },
-      {
-        label: 'On Order',
-        data: [{ x: lastTs, y: metricTriplet.on_order }],
-        backgroundColor: 'rgba(255,206,86,0.7)'
-      },
-      {
-        label: 'Sold Amount',
-        data: [{ x: lastTs, y: metricTriplet.sold_amount }],
-        backgroundColor: 'rgba(255,99,132,0.7)'
-      }
+      ds('bar', 0, [{ x: lastTs, y: metricTriplet.in_stock }], { label: 'In Stock' }),
+      ds('bar', 1, [{ x: lastTs, y: metricTriplet.on_order }], { label: 'On Order' }),
+      ds('bar', 2, [{ x: lastTs, y: metricTriplet.sold_amount }], { label: 'Sold Amount' })
     ]
   };
 

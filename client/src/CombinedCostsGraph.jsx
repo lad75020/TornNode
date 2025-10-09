@@ -4,18 +4,7 @@ import { filterDatasetsByDate } from './dateFilterUtil.js';
 import { Bar } from 'react-chartjs-2';
 import useChartTheme from './useChartTheme.js';
 import { getLogsByLogId } from './dbLayer.js';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  LogarithmicScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, LogarithmicScale, BarElement, Title, Tooltip, Legend);
+// Chart.js registered globally, including LogarithmicScale
 
 // Helper: ISO week key (YYYY-Www)
 function isoWeekKey(dateStr) {
@@ -34,7 +23,7 @@ export default function CombinedCostsGraph({ logsUpdated, darkMode, chartHeight 
   const [totals, setTotals] = useState({ A: 0, B: 0 });
   const [showChart, setShowChart] = useState(true);
   const [modal, setModal] = useState({ open: false, label: null, payload: null });
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   // Normalisation des montants (gère chaînes avec virgules, $ etc.)
   function toNum(v) {
@@ -170,20 +159,8 @@ export default function CombinedCostsGraph({ logsUpdated, darkMode, chartHeight 
                 data={{
                   labels: chartData.labels,
                   datasets: [
-                    {
-                      label: 'Purchases',
-                      data: chartData.seriesA.map(v => (v > 0 ? v : null)),
-                      backgroundColor: darkMode ? 'rgba(80,160,255,0.65)' : 'rgba(20,90,180,0.85)',
-                      borderColor: darkMode ? 'rgba(120,190,255,1)' : 'rgba(30,110,200,1)',
-                      borderWidth: 1
-                    },
-                    {
-                      label: 'Sales',
-                      data: chartData.seriesB.map(v => (v > 0 ? v : null)),
-                      backgroundColor: darkMode ? 'rgba(255,140,90,0.65)' : 'rgba(230,90,20,0.85)',
-                      borderColor: darkMode ? 'rgba(255,170,130,1)' : 'rgba(240,110,40,1)',
-                      borderWidth: 1
-                    }
+                    ds('bar', 0, chartData.seriesA.map(v => (v > 0 ? v : null)), { label: 'Purchases', borderWidth: 1 }),
+                    ds('bar', 1, chartData.seriesB.map(v => (v > 0 ? v : null)), { label: 'Sales', borderWidth: 1 }),
                   ]
                 }}
                 options={themedOptions({

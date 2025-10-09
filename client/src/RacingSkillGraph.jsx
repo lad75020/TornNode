@@ -1,20 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import {
-  Chart as ChartJS,
-  LineElement,
-  PointElement,
-  LinearScale,
-  TimeScale,
-  Tooltip,
-  Legend,
-  Filler,
-  CategoryScale,
-} from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { Line } from 'react-chartjs-2';
-import { applyCommonChartOptions } from './chartTheme.js';
-
-ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend, Filler, CategoryScale);
+import useChartTheme from './useChartTheme.js';
 
 /**
  * RacingSkillGraph
@@ -24,6 +11,7 @@ ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Leg
 export default function RacingSkillGraph({ wsRef, wsMessages, sendWs, darkMode, chartHeight = 400 }) {
   const [points, setPoints] = useState([]); // {t: Date, v: number}
   const requestedRef = useRef(false);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
   // Écoute des messages globaux déjà collectés par Main
   useEffect(() => {
@@ -66,20 +54,11 @@ export default function RacingSkillGraph({ wsRef, wsMessages, sendWs, darkMode, 
   const data = {
     labels,
     datasets: [
-      {
-        label: 'Racing Skill',
-        data: dataVals,
-        borderColor: lineColor,
-        backgroundColor: fillColor,
-        pointRadius: 2,
-        tension: 0.2,
-        fill: true,
-        yAxisID: 'y',
-      }
+      ds('line', 0, dataVals, { label: 'Racing Skill', pointRadius: 2, tension: 0.2, fill: true, yAxisID: 'y', borderColor: lineColor, backgroundColor: fillColor })
     ]
   };
 
-  const options = applyCommonChartOptions({
+  const options = themedOptions({
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
@@ -98,7 +77,7 @@ export default function RacingSkillGraph({ wsRef, wsMessages, sendWs, darkMode, 
       legend: { display: true },
       tooltip: { enabled: true },
     }
-  }, darkMode);
+  });
 
   return (
     <div

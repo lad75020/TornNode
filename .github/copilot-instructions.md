@@ -1,4 +1,4 @@
-## TornNode / Expo – Guide succinct pour agents IA
+## TornNode – Guide succinct pour agents IA
 
 Objectif: Faciliter contributions rapides et sûres sur une stack Fastify (backend temps-réel + Mongo/Redis) et front React/Vite orienté visualisation de données de Torn City. Concentrez-vous sur les patterns existants: WebSocket orienté commandes textuelles/JSON, multi‑tenant Mongo (1 DB par userID), cache Redis JSON pour items et agrégations de prix.
 
@@ -11,7 +11,7 @@ Backend (`tornnode/`):
 - Averages journaliers: déclenchés via message JSON `{ type:'dailyPriceAverage' }` qui appelle `dailyPriceAverager`. Réutilisez ce style pour tâches batch asynchrones: lancer, répondre `ok:true/false`, log côté serveur plutôt que bloquer le socket.
 - Conventions WebSocket: réponses structurées avec `type` miroir de la commande (`updatePrice`, `dailyPriceAverage`, `stopImportAck`). En cas d’erreur, inclure `ok:false` ou `error:<message>`; sinon `ok:true` + données. Préservez ce contrat.
 
-Frontend (`Expo/`):
+Frontend (`client/`):
 - React + Vite modules, séparation par graphes de statistiques (fichiers `*Graph.jsx`, `*Chart.jsx`). Les composants consomment des données (souvent séries temporelles) via IndexedDB (`indexeddbUtils.js`, `storeLogsToIndexedDB.jsx`, `syncItemsToIndexedDB.js`). Suivre ce flux si ajout d’un nouveau graphique: (1) ingestion / sync → (2) stockage local → (3) composant Chart.js avec thèmes (voir `useChartTheme.js` + `chartTheme.js`).
 - Découpage Rollup manuel dans `vite.config.js` pour packs vendors (`vendor-react`, `vendor-chart`, `vendor-bootstrap`); si ajout d’un gros vendor, évaluer mise à jour `manualChunks` au lieu d’imports dynamiques aléatoires.
 
@@ -25,7 +25,7 @@ Frontend (`Expo/`):
 
 ### Workflows de développement
 - Backend: pas de scripts npm définis; lancer directement `node tondatsdubbo.js` (fichier `main`). Ajouter un script si vous introduisez un outil récurrent (ex: `"dev": "node tonstatsdubbo.js"`).
-- Tests: Jest configuré mais aucun test `*.test.js` présent; Playwright config côté backend (`tornnode/tests/` avec `test-1.spec.ts`). Front a ses propres tests E2E (`Expo/tests/*.spec.ts`) exécutables via `npm run test:e2e` dans `Expo/`.
+- Tests: Jest configuré mais aucun test `*.test.js` présent; Playwright config côté backend (`tornnode/tests/` avec `test-1.spec.ts`). Front a ses propres tests E2E (`client/tests/*.spec.ts`) exécutables via `npm run test:e2e` dans `client/`.
 - Lint front: `npm run lint` (ESLint flat config). Respecter séparation vendors, ne pas introduire d’import circulaire entre graph components.
 
 ### Ajout d’une nouvelle commande WebSocket (exemple)
@@ -79,7 +79,7 @@ Conventions d'entité utilisées localement:
 - `ws:*`       → `entityType: ws-handler`
 - `data:collections` → `entityType: data-model`
 - `batch:*`    → `entityType: batch-task`
-- `front:*` ou chemins `Expo/src/...` → `frontend-component`, `frontend-hook`, `frontend-util`, `frontend-config`
+- `front:*` ou chemins `client/src/...` → `frontend-component`, `frontend-hook`, `frontend-util`, `frontend-config`
 - `conv:conventions` → `entityType: conventions`
 - `utils/...`  → `util-backend`
 

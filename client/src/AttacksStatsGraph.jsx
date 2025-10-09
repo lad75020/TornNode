@@ -3,16 +3,6 @@ import { filterDatasetsByDate } from './dateFilterUtil.js';
 import useChartTheme from './useChartTheme.js';
 import { openDB } from 'idb';
 import { Bar } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 // Passage HTTP -> WebSocket : plus besoin d'URL HTTP
 const ONE_DAY = 24 * 60 * 60; // seconds in a day
@@ -26,7 +16,7 @@ export default function AttacksStatsGraph({ darkMode, wsMessages, sendWs, dateFr
   const [logsEmpty, setLogsEmpty] = useState(false); // si DB vide on propose Refresh
   const [readyToFetch, setReadyToFetch] = useState(false); // devient true si DB non vide OU user clique Refresh
   const [showChart, setShowChart] = useState(true);
-  const { themedOptions } = useChartTheme(darkMode);
+  const { themedOptions, ds } = useChartTheme(darkMode);
   // Refs définis AU NIVEAU du composant (respect des règles des hooks)
   const pendingDaysRef = useRef(new Set());
   const statsMapRef = useRef(new Map());
@@ -62,10 +52,10 @@ export default function AttacksStatsGraph({ darkMode, wsMessages, sendWs, dateFr
     if (dateTo) filtered = filtered.filter(e => e.date <= dateTo);
     const baseLabels = filtered.map(s=>s.date);
     const baseDatasets = [
-      { label:'Wins', data: filtered.map(s=>s.wins||0), borderColor:'rgba(2,107,27,1)', backgroundColor:'rgba(40,167,70,1)' },
-      { label:'Losses', data: filtered.map(s=>s.losses||0), borderColor:'rgba(220,53,70,1)', backgroundColor:'rgba(220,53,70,1)' },
-      { label:'Attacks', data: filtered.map(s=>s.attacks||0), borderColor:'rgba(4,0,255,1)', backgroundColor:'rgba(7,68,109,1)' },
-      { label:'Defends', data: filtered.map(s=>s.defends||0), borderColor:'rgba(124,90,3,1)', backgroundColor:'rgba(131,95,4,1)' }
+      ds('bar', 0, filtered.map(s=>s.wins||0), { label:'Wins' }),
+      ds('bar', 1, filtered.map(s=>s.losses||0), { label:'Losses' }),
+      ds('bar', 2, filtered.map(s=>s.attacks||0), { label:'Attacks' }),
+      ds('bar', 3, filtered.map(s=>s.defends||0), { label:'Defends' })
     ];
     const { labels, datasets } = filterDatasetsByDate(baseLabels, baseDatasets, dateFrom, dateTo);
     setChartData({ labels, datasets });

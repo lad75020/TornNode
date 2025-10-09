@@ -6,19 +6,7 @@ import { getLogsByLogId } from './dbLayer.js';
 import { Bar } from 'react-chartjs-2';
 import JsonPreview from './JsonPreview.jsx';
 import useBarBucketModal from './hooks/useBarBucketModal.js';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend);
+// Chart.js globally registered in chartSetup
 
 // Graphique des gains (log 9015, data.money_gained) agrégé par jour / semaine / mois
 export default function MoneyGainedGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {

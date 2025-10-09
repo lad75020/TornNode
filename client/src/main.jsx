@@ -23,11 +23,9 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import { pushToast, pushOrReplaceToast } from './toastBus.js';
 import ToastHost from './ToastHost.jsx';
 // Enregistrement global Chart.js pour éviter les erreurs "point/line/bar is not registered"
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend } from 'chart.js';
-try {
-  ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
-} catch(_) { /* ignore double register */ }
+import './chartSetup.js';
 const Autocomplete = lazy(() => import('./Autocomplete.jsx'));
+const ItemsTypeDropdown = lazy(() => import('./ItemsTypeDropdown.jsx'));
 import { handleStoreLogs } from './storeLogsToIndexedDB.jsx';
 import { writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
 const LogsGraph = lazy(() => import('./LogsGraph.jsx'));
@@ -58,6 +56,82 @@ const CompanyDetailsHistoryChart = lazy(() => import('./CompanyDetailsHistoryCha
 const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
+
+// Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
+// and indexes "log" and "timestamp". If it already exists, do nothing.
+(function ensureLogsDB() {
+  try {
+    const idb = window.indexedDB || window.mozIndexedDB || window.webkitIndexedDB || window.msIndexedDB;
+    if (!idb) { console.warn('[LogsDB] IndexedDB not supported'); return; }
+
+    const createDB = () => {
+      try {
+        const req = idb.open('LogsDB', 1);
+        req.onupgradeneeded = function (event) {
+          const db = event.target.result;
+          const tx = event.target.transaction;
+          let store;
+          if (!db.objectStoreNames.contains('logs')) {
+            store = db.createObjectStore('logs', { keyPath: '_id' });
+          } else {
+            try { store = tx.objectStore('logs'); } catch (_) { /* ignore */ }
+          }
+          if (store) {
+            if (!store.indexNames.contains('log')) {
+              store.createIndex('log', 'log', { unique: false });
+            }
+            if (!store.indexNames.contains('timestamp')) {
+              store.createIndex('timestamp', 'timestamp', { unique: false });
+            }
+          }
+        };
+        req.onsuccess = (e) => { try { e.target.result.close(); } catch(_) {} };
+        req.onerror = (e) => { console.error('[LogsDB] open/create error:', e.target?.error || e); };
+      } catch (err) {
+        console.error('[LogsDB] create error:', err);
+      }
+    };
+
+    if (typeof idb.databases === 'function') {
+      // Modern check: list databases to see if LogsDB already exists
+      idb.databases().then((dbs) => {
+        const exists = Array.isArray(dbs) && dbs.some((d) => d && d.name === 'LogsDB');
+        if (!exists) {
+          createDB();
+        } else {
+          // Optional shape check (no migration): warn if schema differs
+          const req = idb.open('LogsDB');
+          req.onsuccess = (ev) => {
+            const db = ev.target.result;
+            try {
+              if (!db.objectStoreNames.contains('logs')) {
+                console.warn('[LogsDB] DB exists but store "logs" is missing');
+              } else {
+                const tx = db.transaction('logs', 'readonly');
+                const store = tx.objectStore('logs');
+                const keyPath = store.keyPath;
+                const names = store.indexNames;
+                const hasLog = names && names.contains('log');
+                const hasTs = names && names.contains('timestamp');
+                if (keyPath !== '_id' || !hasLog || !hasTs) {
+                  console.warn('[LogsDB] Existing schema differs', { keyPath, indexes: Array.from(names || []) });
+                }
+              }
+            } catch (_) { /* ignore */ }
+            try { db.close(); } catch(_) {}
+          };
+          req.onerror = () => { /* ignore */ };
+        }
+      }).catch(() => {
+        // Fallback: try to create (safe if it already exists; no upgrade will run)
+        createDB();
+      });
+    } else {
+      // Fallback for browsers without indexedDB.databases()
+      createDB();
+    }
+  } catch (_) { /* ignore */ }
+})();
 // ChartSlider doit être défini hors de Main
 const ChartSlider = memo(function ChartSlider({ token, logsUpdated, wsRef, wsMessages, sendWs, darkMode, slider, dateFrom, dateTo, onMinDate }) {
   const navigate = useNavigate();
@@ -219,6 +293,7 @@ function Main() {
   // Slider
   const slider = useChartSlider(chartComponents.length);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [selectedItemType, setSelectedItemType] = useState('');
 
   const handleToggleTheme = cycleTheme;
 
@@ -277,9 +352,8 @@ function Main() {
   const [logsUpdated, setLogsUpdated] = useState(false);
   const [logsImportedCount, setLogsImportedCount] = useState(0);
   const [attacksImportedCount, setAttacksImportedCount] = useState(0);
-  // Refs pour gestion toast final import logs
+  // Refs pour gestion import logs
   const logsImportCompletedRef = useRef(false); // devient true quand progress logs atteint 100%
-  const logsCountShownRef = useRef(0); // dernier count affiché dans le toast
   // Refs pour gestion toast final import attacks
   const attacksImportCompletedRef = useRef(false);
   const attacksCountShownRef = useRef(0);
@@ -350,58 +424,34 @@ function Main() {
       if (kind === 'logs') {
         setLogsImportPercent(percentNum);
       }
-      const logsCountSuffix = (kind === 'logs' && percentNum >= 100 && logsImportedCount > 0)
-        ? ` – ${logsImportedCount} logs`
-        : '';
       const attacksCountSuffix = (kind === 'attacks' && percentNum >= 100 && attacksImportedCount > 0)
         ? ` – ${attacksImportedCount} attacks`
         : '';
-      pushOrReplaceToast({
-        key: `import-${kind}`,
-        replace: true,
-        ttl,
-        kind: percentNum >= 100 ? 'success' : 'info',
-        title,
-        body: `${percentNum.toFixed(1)}% (${kind})${percentNum >= 100 ? ' Terminé' : ''}${logsCountSuffix}${attacksCountSuffix}`,
-        raw: null
-      });
-      if (percentNum >= 100) {
-        setTimeout(() => {
-          const finalLogsSuffix = (kind === 'logs' && logsImportedCount > 0)
-            ? ` – ${logsImportedCount} logs`
-            : '';
-          const finalAttacksSuffix = (kind === 'attacks' && attacksImportedCount > 0)
-            ? ` – ${attacksImportedCount} attacks`
-            : '';
-            if (kind === 'logs' && logsImportedCount > 0) {
-              logsCountShownRef.current = logsImportedCount;
-            }
+      if (kind !== 'logs') {
+        pushOrReplaceToast({
+          key: `import-${kind}`,
+          replace: true,
+          ttl,
+          kind: percentNum >= 100 ? 'success' : 'info',
+          title,
+          body: `${percentNum.toFixed(1)}% (${kind})${percentNum >= 100 ? ' Terminé' : ''}${attacksCountSuffix}`,
+          raw: null
+        });
+        if (percentNum >= 100) {
+          setTimeout(() => {
+            const finalAttacksSuffix = (kind === 'attacks' && attacksImportedCount > 0)
+              ? ` – ${attacksImportedCount} attacks`
+              : '';
             if (kind === 'attacks' && attacksImportedCount > 0) {
               attacksCountShownRef.current = attacksImportedCount;
             }
-          pushOrReplaceToast({ key: `import-${kind}`, replace: true, ttl: 4000, kind: 'success', title, body: `Terminé 100%${finalLogsSuffix}${finalAttacksSuffix}` });
-        }, 300);
+            pushOrReplaceToast({ key: `import-${kind}`, replace: true, ttl: 4000, kind: 'success', title, body: `Terminé 100%${finalAttacksSuffix}` });
+          }, 300);
+        }
       }
     }
     lastProcessedProgressIdxRef.current = wsMain.messages.length;
   }, [wsMain.messages]);
-
-  // Dès que le nombre total de logs importés (importedData) est connu après completion, rafraîchir le toast si nécessaire
-  useEffect(() => {
-    if (!logsImportCompletedRef.current) return; // pas encore fini
-    if (logsImportedCount <= 0) return; // pas de compte
-    if (logsCountShownRef.current === logsImportedCount) return; // déjà affiché
-    // Mettre à jour le toast existant sans reset du TTL si possible (on remet un TTL court pour s'assurer fermeture propre)
-    pushOrReplaceToast({
-      key: 'import-logs',
-      replace: true,
-      ttl: 5000,
-      kind: 'success',
-      title: 'Import Logs',
-      body: `Terminé 100% – ${logsImportedCount} logs`
-    });
-    logsCountShownRef.current = logsImportedCount;
-  }, [logsImportedCount]);
 
   // Rafraîchir toast attacks après réception du nombre total
   useEffect(() => {
@@ -488,17 +538,15 @@ function Main() {
 
   // Auto-trigger importedData désactivé (obsolete / provoquait ré-entrées)
 
-  // --- Manual Logs Sync (wsGetAllTornLogs) avec état + throttling toasts ---
+  // --- Manual Logs Sync (wsGetAllTornLogs) avec suivi d'état ---
   const [manualLogsSync, setManualLogsSync] = useState({ active:false, requestId:null, sent:0, total:0, pct:0 });
   const manualLogsSyncRef = useRef(manualLogsSync);
   useEffect(()=>{ manualLogsSyncRef.current = manualLogsSync; }, [manualLogsSync]);
-  const lastManualToastRef = useRef({ pct:-10, time:0 });
   const handleManualLogsSync = useCallback(() => {
     if (wsMain.status !== 'open') return;
     if (manualLogsSyncRef.current.active) return;
     // Cooldown local (évite double-clic spam)
     if (manualLogsSyncRef.current._lastEnd && Date.now() - manualLogsSyncRef.current._lastEnd < 16000) {
-      pushToast({ kind:'info', title:'Logs', body:'Veuillez attendre un court instant avant une nouvelle sync.' });
       return;
     }
     const requestId = 'mls_'+Date.now().toString(36);
@@ -513,12 +561,8 @@ function Main() {
     setManualLogsSync({ active:true, requestId, sent:0, total:0, pct:0 });
     try {
       wsMain.send(JSON.stringify({ type:'getAllTornLogs', from, to, batchSize:1000, requestId }));
-      lastManualToastRef.current = { pct:0, time:Date.now() };
-          // Toast persistant (pas de TTL) jusqu'à fin / erreur
-          pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:'Sync manuelle démarrée…', persistent:true });
     } catch(e) {
       setManualLogsSync({ active:false, requestId:null, sent:0, total:0, pct:0 });
-      pushToast({ kind:'error', title:'Logs', body:'Échec envoi requête', raw:{ error:e.message } });
     }
   }, [wsMain.status, wsMain.send, dateFrom, dateTo]);
 
@@ -558,32 +602,23 @@ function Main() {
     },
     onManualLogs: (parsed) => {
       if (parsed.error === 'cooldown' && parsed.phase === 'ignored') {
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:`Cooldown (${Math.ceil((parsed.remaining||0)/1000)}s)` , ttl:4000 });
         return;
       } else if (parsed.phase === 'ignored') {
         return;
       } else if (parsed.phase === 'start') {
         setManualLogsSync(s => ({ ...s, total: parsed.total||0, sent:0, pct:0 }));
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:`Début sync (${parsed.total} logs)…`, persistent:true });
       } else if (parsed.phase === 'batch') {
         const pct = parsed.total ? Math.min(100, Math.round(parsed.sent/parsed.total*100)) : 100;
         if (pct !== manualLogsSyncRef.current.pct) {
           setManualLogsSync(s => ({ ...s, sent: parsed.sent, total: parsed.total||s.total, pct }));
         }
-        const now = Date.now();
-        if ((pct - lastManualToastRef.current.pct >= 5) || (now - lastManualToastRef.current.time > 4000) || pct >= 100) {
-          lastManualToastRef.current = { pct, time: now };
-          pushOrReplaceToast({ key:'manualLogsSync', kind:'info', title:'Logs', body:`${parsed.sent}/${parsed.total} (${pct}%)`, persistent:true });
-        }
       } else if (parsed.phase === 'end') {
         const pct = parsed.total ? Math.min(100, Math.round(parsed.sent/parsed.total*100)) : 100;
         setManualLogsSync(s => ({ ...s, sent: parsed.sent, total: parsed.total||s.total, pct, active:false }));
         manualLogsSyncRef.current._lastEnd = Date.now();
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'success', title:'Logs', body:`Terminé: ${parsed.sent}/${parsed.total} (${pct}%)`, ttl:8000 });
         handleStoreLogsAndRefresh(setStoreProgress);
       } else if (parsed.ok === false && parsed.error) {
         setManualLogsSync(s => ({ ...s, active:false }));
-        pushOrReplaceToast({ key:'manualLogsSync', kind:'error', title:'Logs', body:`Erreur: ${parsed.error}`, ttl:8000 });
       }
     },
     onImportStopped: (parsed) => {
@@ -591,14 +626,16 @@ function Main() {
       if (k) {
         canceledImportsRef.current[k] = true;
         const pct = lastImportPercentRef.current[k] ?? 0;
-        pushOrReplaceToast({
-          key:`import-${k}`,
-          replace:true,
-          ttl:6000,
-          kind:'warning',
-          title: k === 'logs' ? 'Import Logs' : (k === 'attacks' ? 'Import Attacks' : 'Import'),
-          body:`Annulé à ${pct.toFixed ? pct.toFixed(1) : pct}%`
-        });
+        if (k !== 'logs') {
+          pushOrReplaceToast({
+            key:`import-${k}`,
+            replace:true,
+            ttl:6000,
+            kind:'warning',
+            title: k === 'attacks' ? 'Import Attacks' : 'Import',
+            body:`Annulé à ${pct.toFixed ? pct.toFixed(1) : pct}%`
+          });
+        }
       } else {
         pushToast({ kind:'warning', title:'Import', body:'Import stoppé', raw:parsed });
       }
@@ -853,7 +890,7 @@ function Main() {
           onClick={() => setShowAutocomplete(false)}
         >
           <div
-            className="modal-dialog"
+            className="modal-dialog modal-lg"
             onClick={e => e.stopPropagation()}
           >
             <div className="modal-content">
@@ -862,17 +899,27 @@ function Main() {
                 <button type="button" className="btn-close" onClick={() => setShowAutocomplete(false)}></button>
               </div>
               <div className="modal-body">
-                {/* Suspense wrapper ajouté pour chargement lazy de Autocomplete */}
-                <Suspense fallback={<div><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '80px' }} /></div>}>
-                  <Autocomplete
-                    token={token}
-                    watchedItems={watchedItems}
-                    onWatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'watch', itemId })); } catch {} }}
-                    onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
-                    sendWs={sendWithPulse}
-                    wsMessages={wsMain.messages}
-                  />
-                </Suspense>
+                <div className="d-flex align-items-start" style={{ gap: 16 }}>
+                  {/* Suspense wrapper pour chargement lazy de Autocomplete */}
+                  <Suspense fallback={<div><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '80px' }} /></div>}>
+                    <Autocomplete
+                      token={token}
+                      watchedItems={watchedItems}
+                      onWatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'watch', itemId })); } catch {} }}
+                      onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
+                      sendWs={sendWithPulse}
+                      wsMessages={wsMain.messages}
+                      filterType={selectedItemType}
+                    />
+                  </Suspense>
+                  <Suspense fallback={<div style={{ minWidth: 220, textAlign: 'center' }}><img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: '60px' }} /></div>}>
+                    <ItemsTypeDropdown
+                      wsMessages={wsMain.messages}
+                      value={selectedItemType}
+                      onTypeChange={setSelectedItemType}
+                    />
+                  </Suspense>
+                </div>
               </div>
             </div>
           </div>
@@ -903,4 +950,3 @@ createRoot(document.getElementById('root')).render(
 );
 
 export default Main;
-

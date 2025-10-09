@@ -1,8 +1,5 @@
 module.exports = async function wsGetAllTornItems(socket, req, fastify, parsed) {
-  if (!req.session || !req.session.TornAPIKey) {
-    try { socket.send(JSON.stringify({ type:'getAllTornItems', ok:false, error:'unauthorized' })); } catch {}
-    return;
-  }
+
   const redisClient = fastify.redis;
   const { ITEMS_KEY_PREFIX, REQUIRED_ITEM_FIELDS } = require('../utils/itemsCacheKey.cjs');
   try {

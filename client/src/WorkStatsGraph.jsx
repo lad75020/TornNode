@@ -1,17 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import useChartTheme from './useChartTheme.js';
 import { Line } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend
-} from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
 // Communication désormais via WebSocket (message JSON type: companyTrainRange)
 const START_EPOCH = 1716574650; // initial from value

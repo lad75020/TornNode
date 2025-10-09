@@ -20,6 +20,21 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
     if (!filter || !value) return value;
     const f = filter.toLowerCase();
     try {
+      // Prefer filtering the nested collection value.root.items if present
+      if (value && value.root && Array.isArray(value.root.items)) {
+        const items = value.root.items.filter(it => {
+          try { return JSON.stringify(it).toLowerCase().includes(f); } catch { return false; }
+        });
+        return { ...value, root: { ...value.root, items }, filteredCount: items.length, originalCount: value.root.items.length, __filtered: true };
+      }
+      // Alternate payload shape support: value.object.root.items
+      if (value && value.object && value.object.root && Array.isArray(value.object.root.items)) {
+        const items = value.object.root.items.filter(it => {
+          try { return JSON.stringify(it).toLowerCase().includes(f); } catch { return false; }
+        });
+        return { ...value, object: { ...value.object, root: { ...value.object.root, items } }, filteredCount: items.length, originalCount: value.object.root.items.length, __filtered: true };
+      }
+      // Fallback: filter a top-level items array if present
       if (value && Array.isArray(value.items)) {
         const items = value.items.filter(it => {
           try { return JSON.stringify(it).toLowerCase().includes(f); } catch { return false; }
@@ -79,7 +94,14 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
           }
             return v;
         }));
-        const instance = jsonview.renderJSON({ root: safe }, containerRef.current);
+        // Display only the nested collection at value.root.items if available; otherwise, display the full object
+        console.log(JSON.stringify(safe));
+        const toDisplay = (safe && safe.items && Array.isArray(safe.items))
+          ? safe.items
+          : (safe && safe.object && safe.object.root && Array.isArray(safe.object.root.items))
+            ? safe.object.root.items
+            : safe;
+        const instance = jsonview.renderJSON({ root: toDisplay }, containerRef.current);
         jsonViewInstanceRef.current = instance;
         
         // Restore expansion state after a short delay to ensure DOM is ready

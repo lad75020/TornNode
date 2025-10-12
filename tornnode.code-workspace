@@ -27,5 +27,10 @@
 		"gitea.repo": "tornnode",
 		"gitea.token": "abb54af3df6a0ecea02938b78790dce3d402c196",
 	},
+	"extensions": {
+		"recommendations": [
+			"sakunpanthi.gitea-integration"
+		]
+	},
 
 }

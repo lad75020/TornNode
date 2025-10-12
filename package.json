@@ -50,9 +50,15 @@
     "nanoid": "^5.1.5"
   },
   "devDependencies": {
+    "@eslint/css": "^0.13.0",
+    "@eslint/js": "^9.37.0",
+    "@eslint/json": "^0.13.2",
     "@playwright/test": "^1.52.0",
     "@types/node": "^22.15.21",
     "@vitejs/plugin-react": "^5.0.2",
+    "eslint": "^9.37.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.4.0",
     "node-redis": "^0.1.7",
     "vite": "^7.1.5"
   },

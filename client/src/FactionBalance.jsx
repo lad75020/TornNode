@@ -27,21 +27,22 @@ export default function FactionBalanceChart({ logsUpdated, darkMode, chartHeight
       const points = [];
       for (const obj of all) {
         if (obj.data && typeof obj.data.balance_after === 'number' && typeof obj.timestamp === 'number') {
-          points.push({ x: obj.timestamp, y: obj.data.balance_after });
+          // Convert Unix seconds to milliseconds for Chart.js time scale
+          points.push({ x: obj.timestamp * 1000, y: obj.data.balance_after });
         }
       }
       points.sort((a, b) => a.x - b.x);
       let pts = points;
       if (dateFrom || dateTo) {
         pts = points.filter(p => {
-          const day = new Date(p.x * 1000).toISOString().slice(0,10);
+          const day = new Date(p.x).toISOString().slice(0,10);
           if (dateFrom && day < dateFrom) return false;
           if (dateTo && day > dateTo) return false;
           return true;
         });
       }
       if (points.length) {
-        const firstDay = new Date(points[0].x * 1000).toISOString().slice(0,10);
+        const firstDay = new Date(points[0].x).toISOString().slice(0,10);
         if (onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(firstDay)) { try { onMinDate(firstDay); } catch {} }
       }
       setChartData({
@@ -90,9 +91,10 @@ export default function FactionBalanceChart({ logsUpdated, darkMode, chartHeight
                   },
                   scales: {
                     x: {
-                      title: { display: true, text: 'Timestamp (Unix seconds)' },
-                      type: 'linear',
-                      beginAtZero: false,
+                      title: { display: true, text: 'Date' },
+                      type: 'time',
+                      time: { unit: 'day', displayFormats: { day: 'yyyy-MM-dd' }, tooltipFormat: 'yyyy-MM-dd' },
+                      ticks: { source: 'auto', maxRotation: 0, autoSkip: true },
                     },
                     y: {
                       title: { display: true, text: 'Balance' },

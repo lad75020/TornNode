@@ -15,7 +15,8 @@ import {
   Routes,
   Route,
   useNavigate,
-  useParams
+  useParams,
+  useLocation
 } from 'react-router-dom';
 import './index.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -56,6 +57,7 @@ const CompanyDetailsHistoryChart = lazy(() => import('./CompanyDetailsHistoryCha
 const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
+const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -221,6 +223,7 @@ const chartComponents = [
 ];
 
 function Main() {
+  const location = useLocation();
   const token = localStorage.getItem('jwt');
   // Username dérivé du JWT (payload.username) affiché en majuscules
   const [usernameUpper, setUsernameUpper] = useState('');
@@ -238,6 +241,15 @@ function Main() {
     } catch { setUsernameUpper(''); }
   }, [token]);
   const { darkMode, userTheme, cycleTheme } = useTheme();
+  // Public route (accessible without login)
+  if (location && location.pathname === '/public-bazaar') {
+    return (
+      <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
+        <PublicBazaarPage />
+      </Suspense>
+    );
+  }
+
   // If no token, show Login page
   if (!token) {
     return (

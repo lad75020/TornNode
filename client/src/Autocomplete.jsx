@@ -98,7 +98,7 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
         style={{ padding: 8, width: 200 }}
       />
       {(query || (filterType && filterType.trim())) && (
-        <ul style={{ color: 'black',border: '1px solid #ccc', padding: 0, margin: 0, width: 200, position: 'absolute', background: '#fff', zIndex: 1, maxHeight:300, overflowY:'auto' }}>
+        <ul style={{ color: 'black',border: '1px solid #ccc', padding: 0, margin: 0, width: 200, position: 'absolute', background: '#fff', zIndex: 2000, maxHeight:300, overflowY:'auto' }}>
           {filtered.length === 0 && (
             <li style={{ listStyle:'none', padding:8, fontStyle:'italic', opacity:0.6 }}>Aucun résultat</li>
           )}

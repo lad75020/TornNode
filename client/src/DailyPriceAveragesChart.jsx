@@ -24,6 +24,12 @@ function normalizeDateInput(raw) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
       return { ts: Date.UTC(+d.slice(0,4), +d.slice(5,7)-1, +d.slice(8,10)), day: d };
     }
+    // Format compact YYYYMMDD (ex: 20241018)
+    if (/^\d{8}$/.test(d)) {
+      const y = +d.slice(0,4), m = +d.slice(4,6), dd = +d.slice(6,8);
+      const iso = `${String(y).padStart(4,'0')}-${String(m).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      return { ts: Date.UTC(y, m-1, dd), day: iso };
+    }
     // Remplacer espace par T pour parse standard
     const s = d.replace(' ', 'T');
     const ts = Date.parse(s);
@@ -35,16 +41,23 @@ function normalizeDateInput(raw) {
   return { ts: NaN, day: null };
 }
 
-export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, onMinDate, dateFrom, dateTo }) {
+export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, darkMode, onMinDate, dateFrom, dateTo }) {
   const [lines, setLines] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [attemptedBuild, setAttemptedBuild] = useState(false);
   // useChartTheme retourne { theme, themedOptions, ds }
   const { theme } = useChartTheme(darkMode);
   const bgColor = darkMode ? '#121417' : '#ffffff';
-  // Trigger request initiale
+  // Trigger initial request
   useEffect(() => {
     sendWs && sendWs('dailyPriceAveragesAll');
   }, [sendWs]);
+  // And resend when WS moves to open state
+  useEffect(() => {
+    if (wsStatus === 'open') {
+      sendWs && sendWs('dailyPriceAveragesAll');
+    }
+  }, [wsStatus, sendWs]);
 
   // Ecoute des messages
   useEffect(() => {
@@ -59,9 +72,17 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, 
         if (!selectedId && parsed.lines.length) {
           setSelectedId(parsed.lines[0].id);
         }
+        // Si aucune donnée et pas encore tenté, demander un build côté serveur puis relire
+        if ((!parsed.lines || parsed.lines.length === 0) && !attemptedBuild) {
+          try { sendWs && sendWs(JSON.stringify({ type: 'dailyPriceAverage' })); } catch {}
+          setAttemptedBuild(true);
+        }
+      } else if (parsed.type === 'dailyPriceAverage' && parsed.ok) {
+        // Re-demande les séries une fois l'agrégat construit
+        try { sendWs && sendWs('dailyPriceAveragesAll'); } catch {}
       }
     } catch(_) {}
-  }, [wsMessages]);
+  }, [wsMessages, attemptedBuild, sendWs, selectedId]);
 
   const allPoints = useMemo(() => {
     const pts = [];

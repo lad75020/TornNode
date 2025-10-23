@@ -1,9 +1,8 @@
+/* eslint-disable no-empty */
 // Envoie toutes les courbes dailyPriceAverages pour chaque item
 module.exports = async function wsDailyPriceAverages(socket, req, fastify) {
-  if (!req.session || !req.session.TornAPIKey) {
-    try { socket.send(JSON.stringify({ type:'dailyPriceAveragesAll', ok:false, error:'unauthorized' })); } catch {}
-    return;
-  }
+  // Public access: allow sending aggregated daily averages without requiring a user API key.
+  // This endpoint only returns non-sensitive, aggregated item price history.
   try {
   const col = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db('TORN') : fastify.mongo.client.db('TORN')).collection('Items');
     // Projection limitée: id, name, dailyPriceAverages

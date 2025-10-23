@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 export default function Login({ darkMode }) {
   const [username, setUsername] = useState('');
@@ -66,7 +67,10 @@ export default function Login({ darkMode }) {
                 {error}
               </div>
             )}
-            <div className="d-flex justify-content-end" style={{ gap: 8 }}>
+            <div className="d-flex justify-content-between align-items-center" style={{ gap: 8 }}>
+              <Link to="/public-bazaar" className="btn btn-outline-secondary" aria-label="Open public market page">
+                View Market (public)
+              </Link>
               <button type="submit" className="btn btn-primary" disabled={loading}>
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { filterDatasetsByDate } from './dateFilterUtil.js';
-import useChartTheme from './useChartTheme.js';
 import { openDB } from 'idb';
+import { useState, useEffect } from 'react';
 import { Bar } from 'react-chartjs-2';
+import { filterDatasetsByDate } from './dateFilterUtil';
+import useChartTheme from './useChartTheme';
+
 
 export default function BetResultsGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [chartData, setChartData] = useState({ datasets: [] });
@@ -65,12 +66,14 @@ export default function BetResultsGraph({ logsUpdated, darkMode, chartHeight = 4
       const data8300 = sortedDays.map(day => daySums[8300][day] || 0);
       const data8301 = sortedDays.map(day => daySums[8301][day] || 0);
       if (sortedDays.length && onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(sortedDays[0])) {
-        try { onMinDate(sortedDays[0]); } catch {}
+        try { onMinDate(sortedDays[0]); } catch { }
       }
-      const base = { labels: sortedDays, datasets: [
-        ds('bar', 0, data8300, { label: 'Gain', borderWidth: 1 }),
-        ds('bar', 1, data8301, { label: 'Bets', borderWidth: 1 }),
-      ]};
+      const base = {
+        labels: sortedDays, datasets: [
+          ds('bar', 0, data8300, { label: 'Gain', borderWidth: 1 }),
+          ds('bar', 1, data8301, { label: 'Bets', borderWidth: 1 }),
+        ]
+      };
       const filtered = filterDatasetsByDate(base.labels, base.datasets, dateFrom, dateTo);
       setChartData(filtered);
       setLoading(false);
@@ -108,8 +111,7 @@ export default function BetResultsGraph({ logsUpdated, darkMode, chartHeight = 4
                   x: { title: { display: true, text: 'Day' }, type: 'category' },
                   y: { title: { display: true, text: 'Amount' }, beginAtZero: true, type: 'linear' },
                 },
-              })}
-            />
+              })} />
           </div>
         )
       )}

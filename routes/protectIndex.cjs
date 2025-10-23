@@ -11,6 +11,15 @@ module.exports = async function (fastify) {
     return false;
   }
 
+  // Public SPA route: allow public-bazaar without auth, serve SPA index
+  fastify.get('/public-bazaar', {}, (req, reply) => {
+    reply
+      .header('Cache-Control', 'no-store, private, max-age=0')
+      .header('Pragma', 'no-cache')
+      .header('Expires', '0')
+      .sendFile('index.html');
+  });
+
   // Route protégée explicite
   fastify.get('/index.html', {
     preHandler: (req, reply, done) => {

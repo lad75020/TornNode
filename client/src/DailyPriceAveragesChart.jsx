@@ -201,6 +201,58 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, 
             ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(W-10,y); ctx.stroke();
             ctx.fillText(t.toFixed(0), 2, y+3);
           }
+          // Graduations X (dates)
+          // Re-calculer les bornes de dates pour aligner les labels X avec la normalisation utilisée
+          try {
+            const dayMs = 24*3600*1000;
+            const allTs = [];
+            lines.forEach(l => l.points.forEach(p => {
+              const { ts } = normalizeDateInput(p.date);
+              if (!isNaN(ts)) allTs.push(ts);
+            }));
+            const hasValidDates = allTs.length > 0;
+            if (hasValidDates) {
+              let minTs = Math.min(...allTs);
+              let maxTs = Math.max(...allTs);
+              if (minTs === maxTs) maxTs = minTs + 1;
+              const fromTs = dateFrom ? normalizeDateInput(dateFrom).ts : minTs;
+              const toTs = dateTo ? (normalizeDateInput(dateTo).ts + dayMs - 1) : maxTs;
+              // Espace cible entre labels (px) → nombre de ticks souhaités
+              const targetTicks = Math.max(2, Math.min(10, Math.floor((plotW) / 90)));
+              const spanDays = Math.max(1, Math.round((toTs - fromTs) / dayMs));
+              const stepDays = Math.max(1, Math.ceil(spanDays / targetTicks));
+              // Aligner au début de journée UTC
+              const fromD = new Date(fromTs);
+              let start = Date.UTC(fromD.getUTCFullYear(), fromD.getUTCMonth(), fromD.getUTCDate());
+              // Aligner sur un multiple de stepDays pour éviter labels trop proches au bord
+              const offsetDays = Math.floor(((fromTs - start) / dayMs));
+              if (offsetDays % stepDays !== 0) {
+                const add = stepDays - (offsetDays % stepDays);
+                start += add * dayMs;
+              }
+              ctx.save();
+              ctx.fillStyle = theme.text || '#fff';
+              ctx.strokeStyle = theme.grid || '#444';
+              ctx.font = '10px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'top';
+              for (let tTs = start; tTs <= toTs; tTs += stepDays * dayMs) {
+                const xn = (tTs - minTs) / (maxTs - minTs);
+                const x = scaleX(Math.min(Math.max(xn, 0), 1));
+                // Ligne verticale légère
+                ctx.beginPath();
+                ctx.moveTo(x, zeroY);
+                ctx.lineTo(x, zeroY + plotH);
+                ctx.stroke();
+                // Label date (YYYY-MM-DD)
+                const label = new Date(tTs).toISOString().slice(0,10);
+                ctx.fillText(label, x, H - 28);
+              }
+              ctx.restore();
+            }
+          } catch (_) {
+            // pas de dates valides ou erreur de parsing: ne rien afficher sur l'axe X
+          }
           // Lignes
           displayed.forEach(l => {
             if (!l.points.length) return;

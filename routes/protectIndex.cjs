@@ -1,3 +1,4 @@
+/* eslint-disable no-empty */
 module.exports = async function (fastify) {
   function isAuthed(req) {
     if (req.session && req.session.TornAPIKey) return true;

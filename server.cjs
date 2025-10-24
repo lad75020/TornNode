@@ -221,10 +221,16 @@ fastify.register(require('@fastify/mongodb'), {
             return;
         }
 
+        // Root route: serve SPA if authenticated, otherwise serve static login page
         fastify.get('/', (req, reply) => {
-            if (req.session && req.session.TornAPIKey)
-                return reply.html();
-            return reply.redirect('/');
+            try {
+
+                    return reply.html();
+  
+            } catch (e) {
+                try { fastify.log && fastify.log.error('[root] handler error: ' + e.message); } catch {}
+                return reply.code(500).send('Internal Server Error');
+            }
         });
     });
     // Warmup amélioré (instrumentation + validation)
@@ -276,6 +282,5 @@ fastify.register(require('@fastify/mongodb'), {
     });
 
     scheduleDailyAverageJob();
-
 
 

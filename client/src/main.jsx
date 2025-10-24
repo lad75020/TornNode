@@ -224,8 +224,20 @@ const chartComponents = [
 
 function Main() {
   const location = useLocation();
-  const token = localStorage.getItem('jwt');
-  // Username dérivé du JWT (payload.username) affiché en majuscules
+  // Track auth token in state so UI reacts immediately on logout/login
+  const [token, setToken] = useState(() => {
+    try { return localStorage.getItem('jwt'); } catch { return null; }
+  });
+  // Keep token in sync if another tab changes it
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e && e.key === 'jwt') setToken(e.newValue);
+    };
+    try { window.addEventListener('storage', onStorage); } catch {}
+    return () => { try { window.removeEventListener('storage', onStorage); } catch {}; };
+  }, []);
+  const { darkMode, userTheme, cycleTheme } = useTheme();
+  // Username derived from JWT for UI header
   const [usernameUpper, setUsernameUpper] = useState('');
   useEffect(() => {
     if (!token) { setUsernameUpper(''); return; }
@@ -233,33 +245,14 @@ function Main() {
       const part = token.split('.')[1];
       if (!part) { setUsernameUpper(''); return; }
       let b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-      while (b64.length % 4) b64 += '='; // padding
+      while (b64.length % 4) b64 += '=';
       const jsonStr = atob(b64);
       const payload = JSON.parse(jsonStr);
       const u = (payload && payload.username) ? String(payload.username).toUpperCase() : '';
       setUsernameUpper(u);
     } catch { setUsernameUpper(''); }
   }, [token]);
-  const { darkMode, userTheme, cycleTheme } = useTheme();
-  // Public route (accessible without login)
-  if (location && location.pathname === '/public-bazaar') {
-    return (
-      <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
-        <PublicBazaarPage />
-      </Suspense>
-    );
-  }
-
-  // If no token, show Login page
-  if (!token) {
-    return (
-      <StrictMode>
-        <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
-          <Login darkMode={true} />
-        </Suspense>
-      </StrictMode>
-    );
-  }
+  // Note: do not early-return here to keep Hooks order stable.
   // WebSockets
   const wsMain = useAppWebSocket('/ws', token);
   const wsBazaar = useAppWebSocket('/wsb', token);
@@ -513,9 +506,12 @@ function Main() {
     requestAnimationFrame(check);
   };
   const handleLogout = () => {
+    // Ask server to drop session and close sockets; then clear JWT and re-render Login
     try { wsMain.send('destroySession'); } catch {}
-    localStorage.removeItem('jwt');
-    location.href = '/';
+    try { wsMain.wsRef?.current?.close?.(); } catch {}
+    try { wsBazaar.wsRef?.current?.close?.(); } catch {}
+    try { localStorage.removeItem('jwt'); } catch {}
+    setToken(null);
   };
 
   const handleStoreLogsAndRefresh = async (setStoreProgress) => {
@@ -670,6 +666,23 @@ function Main() {
   });
 
   // Anciennes fonctions openMarketForItem / sendPriceNotification supprimées (gérées côté hook)
+  // Late conditional returns (after all hooks) to avoid Hook order mismatches
+  if (location && location.pathname === '/public-bazaar') {
+    return (
+      <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
+        <PublicBazaarPage />
+      </Suspense>
+    );
+  }
+  if (!token) {
+    return (
+      <StrictMode>
+        <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
+          <Login darkMode={true} />
+        </Suspense>
+      </StrictMode>
+    );
+  }
   return (
     <div className={`app-root ${darkMode ? 'dark-mode' : 'light-mode'}`}>
       {/* Indicateurs activité WebSocket principale */}

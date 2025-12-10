@@ -39,6 +39,13 @@ export default function Login({ darkMode }) {
       <div className="card" style={{ maxWidth: 420, width: '100%', ...(darkMode ? { background:'#1b1b1b', color:'#e0e0e0', border:'1px solid #2a2a2a' } : {}) }}>
         <div className="card-body">
           <h5 className="card-title" style={{ marginBottom: 12 }}>Login</h5>
+          <div className="text-center" style={{ marginBottom: 16 }}>
+            <img
+              src="/images/ladparis320.avif"
+              alt="Lad Paris"
+              style={{ width: '100%', border: '6px solid #000', borderRadius: 4 }}
+            />
+          </div>
           <form onSubmit={onSubmit}>
             <div className="mb-3">
               <label className="form-label">Username</label>

@@ -31,6 +31,7 @@ try {
             let jsonLogs;
             try {
                 const url = `${process.env.TORN_API_URL}user?selections=log&key=${req.session.TornAPIKey}&from=${t}&to=${to}`;
+                fastify.log.info(`[wsTorn] fetching ${url}`);
                 const response = await fetch(url);
                 jsonLogs = await response.json();
             } catch (e) {

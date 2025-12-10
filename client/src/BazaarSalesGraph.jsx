@@ -14,6 +14,7 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
   const [showChart, setShowChart] = useState(true);
   const [totalSum, setTotalSum] = useState(null);
   const [granularity, setGranularity] = useState('day'); // 'day' | 'week' | 'month'
+  const [yScaleType, setYScaleType] = useState('logarithmic'); // 'logarithmic' | 'linear'
   const [modal, setModal] = useState({ open: false, label: null, payload: null });
   // Mapping bucketLabel -> array de logs bruts (pour reconstituer la liste d'items / ventes)
   const [bucketLogs, setBucketLogs] = useState({});
@@ -156,6 +157,10 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
                   <button type="button" className={`btn btn-sm ${granularity === 'week' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('week')}>Weekly</button>
                   <button type="button" className={`btn btn-sm ${granularity === 'month' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('month')}>Monthly</button>
                 </div>
+                <div className="btn-group btn-group-sm" role="group" aria-label="Y axis scale">
+                  <button type="button" className={`btn ${yScaleType === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'}`} onClick={() => setYScaleType('linear')}>Linear Y</button>
+                  <button type="button" className={`btn ${yScaleType === 'logarithmic' ? 'btn-secondary' : 'btn-outline-secondary'}`} onClick={() => setYScaleType('logarithmic')}>Log Y</button>
+                </div>
               </div>
               <div style={{ flex: 1 }}>
                 <Bar
@@ -204,7 +209,12 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
                     plugins: { legend: { display: true }, tooltip: { enabled: true } },
                     scales: {
                       x: { title: { display: true, text: granularity.charAt(0).toUpperCase() + granularity.slice(1) } },
-                      y: { title: { display: true, text: 'Total sales' }, beginAtZero: true, type: 'logarithmic', min: 1 },
+                      y: {
+                        title: { display: true, text: 'Total sales' },
+                        beginAtZero: yScaleType === 'linear',
+                        type: yScaleType,
+                        min: yScaleType === 'logarithmic' ? 1 : 0,
+                      },
                       y1: { position: 'right', title: { display: true, text: 'Cumul' }, beginAtZero: true, grid: { drawOnChartArea: false } },
                     },
                   })}

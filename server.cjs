@@ -39,7 +39,7 @@ const port = (typeof argv.port === 'number' && !Number.isNaN(argv.port))
     : 3110;
 const host = argv.host || 'localhost';
 const https = argv.https;
-const log = argv.log || false;
+const log = true;//argv.log || false;
 // Mode single-thread: suppression de cluster/multithreading
 const isTest = argv.test || false;
 const MONGO_URI = isTest ? process.env.MONGODB_URI_TEST : process.env.MONGODB_URI;
@@ -81,7 +81,7 @@ socketEvents.on('newSocket', async (socket, req) => {
 });
 
 const fastify = require('fastify')({
-    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/test.log', base: { service: 'tonstatsdubbo' } } : false,
+    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
     trustProxy: true
 });
 

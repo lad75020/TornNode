@@ -45,6 +45,7 @@ const TravelDurationGraph = lazy(() => import('./TravelDurationGraph.jsx'));
 const RacingSkillGraph = lazy(() => import('./RacingSkillGraph.jsx'));
 const NetworthPieChart = lazy(() => import('./NetworthPieChart.jsx'));
 const MoneyLogGraph = lazy(() => import('./MoneyLogGraph.jsx'));
+const BountyRewardChart = lazy(() => import('./BountyRewardChart.jsx'));
 const MoneyGainedGraph = lazy(() => import('./MoneyGainedGraph.jsx'));
 const ItemsGainedGraph = lazy(() => import('./ItemsGainedGraph.jsx'));
 const RacingPositionGraph = lazy(() => import('./RacingPositionGraph.jsx'));
@@ -219,7 +220,7 @@ const chartComponents = [
   { name: 'Company Stock History', Component: CompanyStockHistoryChart },
   { name: 'Company Profile', Component: CompanyProfileChart },
   { name: 'Company Details History', Component: CompanyDetailsHistoryChart },
-  
+  { name: 'Bounty Rewards', Component: BountyRewardChart },
 ];
 
 function Main() {

@@ -1,0 +1,4 @@
+{
+  "deprecated": true,
+  "message": "Les dépendances front sont désormais gérées dans le package.json racine. Ne pas installer ici."
+}

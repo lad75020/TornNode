@@ -33,7 +33,21 @@ function resolveLocalPath(id){
   if (id.startsWith('utils/')) {
     const p = path.join(ROOT, id + '.js'); return fs.existsSync(p)?p:null;
   }
+  // Ancienne structure front: Expo/ supprimée. On cherche désormais sous client/.
   if (id.startsWith('Expo/')) {
+    // Signale un reliquat mémoire non migré.
+    if (!global.__warnedExpoId) {
+      console.warn('[memoryQuality] ID legacy Expo détecté dans graphe:', id);
+      global.__warnedExpoId = true;
+    }
+    const migrated = id.replace(/^Expo\//,'client/');
+    const clean = migrated.replace(/\.jsx$|\.js$/,'');
+    const jsx = path.join(FRONT_ROOT, clean + '.jsx');
+    const js = path.join(FRONT_ROOT, clean + '.js');
+    return fs.existsSync(jsx)?jsx:(fs.existsSync(js)?js:null);
+  }
+  // Nouvelle racine front standard
+  if (id.startsWith('client/')) {
     const clean = id.replace(/\.jsx$|\.js$/,'');
     const jsx = path.join(FRONT_ROOT, clean + '.jsx');
     const js = path.join(FRONT_ROOT, clean + '.js');

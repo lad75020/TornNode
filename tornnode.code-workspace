@@ -1,13 +1,40 @@
 {
-    "folders": [
-        {
-            "path": "."
-        },
-        {
-            "path": "../Expo"
-        }
-    ],
-    "settings": {
-        "chat.agent.maxRequests": 128
-    }
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"**/node_modules": true,
+			"**/.git": true,
+			"**/.DS_Store": true
+		},
+		"githubPullRequests.remotes": [
+			"origin",
+			"upstream",
+			"tornhub"
+		],
+		"chatgpt.openOnStartup": true,
+		"editor.defaultFormatter": "openai.chatgpt",
+		"eslint.format.enable": true,
+		"eslint.ignoreUntitled": true,
+		"eslint.lintTask.enable": true,
+		"eslint.runtime": "/home/laurent/.nvm/versions/node/v25.2.1/bin/node",
+		"editor.defaultFoldingRangeProvider": "VisualStudioExptTeam.vscodeintellicode",
+		"gitea.instanceURL": "https://snapdrop.dubertrand.fr",
+		"gitea.owner": "laurent",
+		"gitea.repo": "tornnode",
+		"gitea.token": "abb54af3df6a0ecea02938b78790dce3d402c196",
+		"[javascriptreact]": {
+			"editor.defaultFormatter": "vscode.typescript-language-features"
+		},
+		"eslint.nodePath": "",
+	},
+	"extensions": {
+		"recommendations": [
+			"sakunpanthi.gitea-integration"
+		]
+	},
+
 }

@@ -1,0 +1,167 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* h5 encadré d'une boîte couleur primaire Bootstrap, largeur 100%, texte à gauche */
+h5 {
+  width: 100%;
+  text-align: left;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 0.5rem;
+  padding: 0.5em 1em;
+  margin-bottom: 1em;
+  box-sizing: border-box;
+  box-shadow: 0 2px 8px rgba(13,110,253,0.08);
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  /* Suppression du flex + centrage qui ajoutaient un grand espace blanc en haut */
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+/* Nouveau conteneur racine sans transform scale pour éviter les coupures horizontales */
+.app-root {
+  width: 100%;
+  max-width: 1900px; /* limite pour très grands écrans */
+  margin: 0 auto;
+  font-size: 1.05rem; /* légère augmentation remplace scale 1.2 */
+}
+
+@media (max-width: 1400px) {
+  .app-root { font-size: 1rem; }
+}
+
+/* Thème clair explicite (hérite déjà de Bootstrap) */
+.app-root.light-mode {
+  background: #ffffff;
+  color: #212529;
+}
+
+/* Thème sombre */
+.app-root.dark-mode {
+  background: #121212;
+  color: #e4e4e4;
+}
+
+.app-root.dark-mode h5 {
+  background: #1e1e1e;
+  color: #e8e8e8;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.app-root.dark-mode .table {
+  color: #ddd;
+  --bs-table-bg: #1b1b1b;
+  --bs-table-striped-bg: #232323;
+  --bs-table-hover-bg: #2a2a2a;
+  border-color: #333;
+}
+.app-root.dark-mode table,
+.app-root.dark-mode table td,
+.app-root.dark-mode table th {
+  color: #e8e8e8 !important;
+}
+.app-root.dark-mode tr.bazaar-alert td {
+  color: #f0fff0 !important;
+}
+.app-root.dark-mode .table thead {
+  background: #242424 !important;
+  color: #bbb;
+}
+
+.app-root.dark-mode .btn-primary { background:#2d4f91; border-color:#2d4f91; }
+.app-root.dark-mode .btn-info { background:#0d5d6d; border-color:#0d5d6d; }
+.app-root.dark-mode .btn-success { background:#1d5d2d; border-color:#1d5d2d; }
+.app-root.dark-mode .btn-warning { background:#7a5c00; border-color:#7a5c00; }
+.app-root.dark-mode .btn-outline-secondary { color:#ddd; border-color:#555; }
+
+.app-root.dark-mode input.form-control,
+.app-root.dark-mode .form-control {
+  background:#1e1e1e;
+  color:#e0e0e0;
+  border:1px solid #444;
+}
+
+.app-root.dark-mode tr.bazaar-alert td { background: rgba(0, 120, 0, 0.35) !important; }
+.app-root.dark-mode tr.bazaar-blink td { animation-name: bazaarBlinkDark; }
+
+@keyframes bazaarBlinkDark {
+  0%, 100% { background: rgba(0,120,0,0.35); }
+  50% { background: rgba(0,170,0,0.55); }
+}
+
+
+/* Surcouche pour lignes d'alerte bazaar (utiliser class bazaar-alert sur <tr>) */
+tr.bazaar-alert td {
+  background: rgba(0, 180, 0, 0.25) !important;
+  font-weight: 600;
+}
+
+/* Animation clignotante (5s ~ 6 cycles de 0.8s) */
+@keyframes bazaarBlink {
+  0%, 100% { background-color: rgba(0,180,0,0.25); }
+  50% { background-color: rgba(0,255,0,0.6); }
+}
+tr.bazaar-blink td {
+  animation: bazaarBlink 0.8s ease-in-out 6;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}

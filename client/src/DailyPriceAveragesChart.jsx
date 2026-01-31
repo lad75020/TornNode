@@ -24,6 +24,12 @@ function normalizeDateInput(raw) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
       return { ts: Date.UTC(+d.slice(0,4), +d.slice(5,7)-1, +d.slice(8,10)), day: d };
     }
+    // Format compact YYYYMMDD (ex: 20241018)
+    if (/^\d{8}$/.test(d)) {
+      const y = +d.slice(0,4), m = +d.slice(4,6), dd = +d.slice(6,8);
+      const iso = `${String(y).padStart(4,'0')}-${String(m).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      return { ts: Date.UTC(y, m-1, dd), day: iso };
+    }
     // Remplacer espace par T pour parse standard
     const s = d.replace(' ', 'T');
     const ts = Date.parse(s);
@@ -35,16 +41,23 @@ function normalizeDateInput(raw) {
   return { ts: NaN, day: null };
 }
 
-export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, onMinDate, dateFrom, dateTo }) {
+export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, darkMode, onMinDate, dateFrom, dateTo }) {
   const [lines, setLines] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [attemptedBuild, setAttemptedBuild] = useState(false);
   // useChartTheme retourne { theme, themedOptions, ds }
   const { theme } = useChartTheme(darkMode);
   const bgColor = darkMode ? '#121417' : '#ffffff';
-  // Trigger request initiale
+  // Trigger initial request
   useEffect(() => {
     sendWs && sendWs('dailyPriceAveragesAll');
   }, [sendWs]);
+  // And resend when WS moves to open state
+  useEffect(() => {
+    if (wsStatus === 'open') {
+      sendWs && sendWs('dailyPriceAveragesAll');
+    }
+  }, [wsStatus, sendWs]);
 
   // Ecoute des messages
   useEffect(() => {
@@ -59,9 +72,17 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, 
         if (!selectedId && parsed.lines.length) {
           setSelectedId(parsed.lines[0].id);
         }
+        // Si aucune donnée et pas encore tenté, demander un build côté serveur puis relire
+        if ((!parsed.lines || parsed.lines.length === 0) && !attemptedBuild) {
+          try { sendWs && sendWs(JSON.stringify({ type: 'dailyPriceAverage' })); } catch {}
+          setAttemptedBuild(true);
+        }
+      } else if (parsed.type === 'dailyPriceAverage' && parsed.ok) {
+        // Re-demande les séries une fois l'agrégat construit
+        try { sendWs && sendWs('dailyPriceAveragesAll'); } catch {}
       }
     } catch(_) {}
-  }, [wsMessages]);
+  }, [wsMessages, attemptedBuild, sendWs, selectedId]);
 
   const allPoints = useMemo(() => {
     const pts = [];
@@ -179,6 +200,58 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, darkMode, 
             ctx.strokeStyle = theme.grid || '#444';
             ctx.beginPath(); ctx.moveTo(40,y); ctx.lineTo(W-10,y); ctx.stroke();
             ctx.fillText(t.toFixed(0), 2, y+3);
+          }
+          // Graduations X (dates)
+          // Re-calculer les bornes de dates pour aligner les labels X avec la normalisation utilisée
+          try {
+            const dayMs = 24*3600*1000;
+            const allTs = [];
+            lines.forEach(l => l.points.forEach(p => {
+              const { ts } = normalizeDateInput(p.date);
+              if (!isNaN(ts)) allTs.push(ts);
+            }));
+            const hasValidDates = allTs.length > 0;
+            if (hasValidDates) {
+              let minTs = Math.min(...allTs);
+              let maxTs = Math.max(...allTs);
+              if (minTs === maxTs) maxTs = minTs + 1;
+              const fromTs = dateFrom ? normalizeDateInput(dateFrom).ts : minTs;
+              const toTs = dateTo ? (normalizeDateInput(dateTo).ts + dayMs - 1) : maxTs;
+              // Espace cible entre labels (px) → nombre de ticks souhaités
+              const targetTicks = Math.max(2, Math.min(10, Math.floor((plotW) / 90)));
+              const spanDays = Math.max(1, Math.round((toTs - fromTs) / dayMs));
+              const stepDays = Math.max(1, Math.ceil(spanDays / targetTicks));
+              // Aligner au début de journée UTC
+              const fromD = new Date(fromTs);
+              let start = Date.UTC(fromD.getUTCFullYear(), fromD.getUTCMonth(), fromD.getUTCDate());
+              // Aligner sur un multiple de stepDays pour éviter labels trop proches au bord
+              const offsetDays = Math.floor(((fromTs - start) / dayMs));
+              if (offsetDays % stepDays !== 0) {
+                const add = stepDays - (offsetDays % stepDays);
+                start += add * dayMs;
+              }
+              ctx.save();
+              ctx.fillStyle = theme.text || '#fff';
+              ctx.strokeStyle = theme.grid || '#444';
+              ctx.font = '10px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'top';
+              for (let tTs = start; tTs <= toTs; tTs += stepDays * dayMs) {
+                const xn = (tTs - minTs) / (maxTs - minTs);
+                const x = scaleX(Math.min(Math.max(xn, 0), 1));
+                // Ligne verticale légère
+                ctx.beginPath();
+                ctx.moveTo(x, zeroY);
+                ctx.lineTo(x, zeroY + plotH);
+                ctx.stroke();
+                // Label date (YYYY-MM-DD)
+                const label = new Date(tTs).toISOString().slice(0,10);
+                ctx.fillText(label, x, H - 28);
+              }
+              ctx.restore();
+            }
+          } catch (_) {
+            // pas de dates valides ou erreur de parsing: ne rien afficher sur l'axe X
           }
           // Lignes
           displayed.forEach(l => {

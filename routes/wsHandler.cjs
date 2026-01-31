@@ -207,54 +207,273 @@ module.exports = (fastify, isTest) => {
                             try {
                                 const parsed = JSON.parse(message);
                                 if (parsed) {
-                                    if (parsed.type === 'companyTrainRange') {
-                                        try { return require('../ws/wsCompanyTrainRange.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getTornAttacks') {
-                                        try { return require('../ws/wsGetTornAttacks.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'updatePrice') {
-                                        try { return require('../ws/wsUpdatePrice.cjs')(socket, req, fastify, parsed, fastify.redis, { isTest }); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getAllTornItems') {
-                                        try { return require('../ws/wsGetAllTornItems.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getAllTornLogs') {
-                                        try { return require('../ws/wsGetAllTornLogs.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'stopImport') {
-                                        // Définir les flags d'arrêt pour les imports en cours
-                                        try {
-                                            const kinds = Array.isArray(parsed.kinds) ? parsed.kinds : ['logs','attacks'];
-                                            socket.__stopImport = socket.__stopImport || {};
-                                            kinds.forEach(k => { socket.__stopImport[k] = true; });
-                                            try { socket.send(JSON.stringify({ type:'stopImportAck', kinds, time:Date.now() })); } catch(_) {}
-                                        } catch(e){ fastify.log.error(e); }
+                                    if (parsed.type === "companyTrainRange") {
+                                      try {
+                                        return require("../ws/wsCompanyTrainRange.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
                                         return;
-                                    } else if (parsed.type === 'dailyPriceAverage') {
-                                            (async () => {
-                                                    try {
-                                                            await dailyPriceAverager({ redisClient: fastify.redis, fastify });
-                                                            const resp = { type:'dailyPriceAverage', ok:true, time:Date.now() };
-                                                            try { socket.send(JSON.stringify(resp)); } catch(_){ }
-                                                    } catch (e) {
-                                                            const resp = { type:'dailyPriceAverage', ok:false, error:e.message, time:Date.now() };
-                                                            fastify.log.debug({ connId, parsedType: parsed && parsed.type }, '[ws] JSON parsed');
-                                                            try { socket.send(JSON.stringify(resp)); } catch(_){ }
-                                                    }
-                                            })();
-                                            return;
-                                    } else if (parsed.type === 'companyStock') {
-                                            try { return require('../ws/wsCompanyStock.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getCompanyStock') {
-                                            try { return require('../ws/wsGetCompanyStock.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getCompanyStockHistory') {
-                                        try { return require('../ws/wsGetCompanyStockHistory.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'companyProfile') {
-                                        try { return require('../ws/wsCompanyProfile.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getCompanyProfile') {
-                                        try { return require('../ws/wsGetCompanyProfile.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getCompanyProfileHistory') {
-                                        try { return require('../ws/wsGetCompanyProfileHistory.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'companyDetails') {
-                                        try { return require('../ws/wsCompanyDetails.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
-                                    } else if (parsed.type === 'getCompanyDetailsHistory') {
-                                        try { return require('../ws/wsGetCompanyDetailsHistory.cjs')(socket, req, fastify, parsed); } catch(e){ fastify.log.error(e); return; }
+                                      }
+                                    } else if (
+                                      parsed.type === "getTornAttacks"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetTornAttacks.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (parsed.type === "updatePrice") {
+                                      try {
+                                        return require("../ws/wsUpdatePrice.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                          fastify.redis,
+                                          { isTest },
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getAllTornItems"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetAllTornItems.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getAllTornLogs"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetAllTornLogs.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (parsed.type === "stopImport") {
+                                      // Définir les flags d'arrêt pour les imports en cours
+                                      try {
+                                        const kinds = Array.isArray(
+                                          parsed.kinds,
+                                        )
+                                          ? parsed.kinds
+                                          : ["logs", "attacks"];
+                                        socket.__stopImport =
+                                          socket.__stopImport || {};
+                                        kinds.forEach((k) => {
+                                          socket.__stopImport[k] = true;
+                                        });
+                                        try {
+                                          socket.send(
+                                            JSON.stringify({
+                                              type: "stopImportAck",
+                                              kinds,
+                                              time: Date.now(),
+                                            }),
+                                          );
+                                        } catch (_) {}
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                      }
+                                      return;
+                                    } else if (
+                                      parsed.type === "dailyPriceAverage"
+                                    ) {
+                                      (async () => {
+                                        try {
+                                          await dailyPriceAverager({
+                                            redisClient: fastify.redis,
+                                            fastify,
+                                          });
+                                          const resp = {
+                                            type: "dailyPriceAverage",
+                                            ok: true,
+                                            time: Date.now(),
+                                          };
+                                          try {
+                                            socket.send(JSON.stringify(resp));
+                                          } catch (_) {}
+                                        } catch (e) {
+                                          const resp = {
+                                            type: "dailyPriceAverage",
+                                            ok: false,
+                                            error: e.message,
+                                            time: Date.now(),
+                                          };
+                                          fastify.log.debug(
+                                            {
+                                              connId,
+                                              parsedType: parsed && parsed.type,
+                                            },
+                                            "[ws] JSON parsed",
+                                          );
+                                          try {
+                                            socket.send(JSON.stringify(resp));
+                                          } catch (_) {}
+                                        }
+                                      })();
+                                      return;
+                                    } else if (parsed.type === "companyStock") {
+                                      try {
+                                        return require("../ws/wsCompanyStock.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getCompanyStock"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetCompanyStock.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getCompanyStockHistory"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetCompanyStockHistory.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "companyProfile"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsCompanyProfile.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getCompanyProfile"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetCompanyProfile.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getCompanyProfileHistory"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetCompanyProfileHistory.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "companyDetails"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsCompanyDetails.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (
+                                      parsed.type === "getCompanyDetailsHistory"
+                                    ) {
+                                      try {
+                                        return require("../ws/wsGetCompanyDetailsHistory.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          parsed,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        return;
+                                      }
+                                    } else if (parsed.type === "dailyPriceAveragesAll") {
+                                      fastify.log.info(
+                                        { connId },
+                                        "[ws] dailyPriceAveragesAll command (json)",
+                                      );
+                                      try {
+                                        return require("../ws/wsDailyPriceAverages.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(
+                                          `[ws] dailyPriceAveragesAll handler error: ${e.message}`,
+                                        );
+                                        try {
+                                          socket.send(
+                                            JSON.stringify({
+                                              type: "dailyPriceAveragesAll",
+                                              ok: false,
+                                              error: e.message,
+                                            }),
+                                          );
+                                        } catch (_) {}
+                                      }
+                                      return;
                                     }
                                 }
                                 // Autres JSON non traités

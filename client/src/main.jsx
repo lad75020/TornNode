@@ -14,8 +14,10 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Link,
   useNavigate,
-  useParams
+  useParams,
+  useLocation
 } from 'react-router-dom';
 import './index.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -44,6 +46,7 @@ const TravelDurationGraph = lazy(() => import('./TravelDurationGraph.jsx'));
 const RacingSkillGraph = lazy(() => import('./RacingSkillGraph.jsx'));
 const NetworthPieChart = lazy(() => import('./NetworthPieChart.jsx'));
 const MoneyLogGraph = lazy(() => import('./MoneyLogGraph.jsx'));
+const BountyRewardChart = lazy(() => import('./BountyRewardChart.jsx'));
 const MoneyGainedGraph = lazy(() => import('./MoneyGainedGraph.jsx'));
 const ItemsGainedGraph = lazy(() => import('./ItemsGainedGraph.jsx'));
 const RacingPositionGraph = lazy(() => import('./RacingPositionGraph.jsx'));
@@ -56,6 +59,8 @@ const CompanyDetailsHistoryChart = lazy(() => import('./CompanyDetailsHistoryCha
 const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
+const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
+const MemoryGraphExplorer = lazy(() => import('./MemoryGraphExplorer.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -217,12 +222,26 @@ const chartComponents = [
   { name: 'Company Stock History', Component: CompanyStockHistoryChart },
   { name: 'Company Profile', Component: CompanyProfileChart },
   { name: 'Company Details History', Component: CompanyDetailsHistoryChart },
-  
+  { name: 'Bounty Rewards', Component: BountyRewardChart },
 ];
 
 function Main() {
-  const token = localStorage.getItem('jwt');
-  // Username dérivé du JWT (payload.username) affiché en majuscules
+  const location = useLocation();
+  const isMemoryPage = location.pathname.startsWith('/memory');
+  // Track auth token in state so UI reacts immediately on logout/login
+  const [token, setToken] = useState(() => {
+    try { return localStorage.getItem('jwt'); } catch { return null; }
+  });
+  // Keep token in sync if another tab changes it
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e && e.key === 'jwt') setToken(e.newValue);
+    };
+    try { window.addEventListener('storage', onStorage); } catch {}
+    return () => { try { window.removeEventListener('storage', onStorage); } catch {}; };
+  }, []);
+  const { darkMode, userTheme, cycleTheme } = useTheme();
+  // Username derived from JWT for UI header
   const [usernameUpper, setUsernameUpper] = useState('');
   useEffect(() => {
     if (!token) { setUsernameUpper(''); return; }
@@ -230,24 +249,14 @@ function Main() {
       const part = token.split('.')[1];
       if (!part) { setUsernameUpper(''); return; }
       let b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-      while (b64.length % 4) b64 += '='; // padding
+      while (b64.length % 4) b64 += '=';
       const jsonStr = atob(b64);
       const payload = JSON.parse(jsonStr);
       const u = (payload && payload.username) ? String(payload.username).toUpperCase() : '';
       setUsernameUpper(u);
     } catch { setUsernameUpper(''); }
   }, [token]);
-  const { darkMode, userTheme, cycleTheme } = useTheme();
-  // If no token, show Login page
-  if (!token) {
-    return (
-      <StrictMode>
-        <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
-          <Login darkMode={true} />
-        </Suspense>
-      </StrictMode>
-    );
-  }
+  // Note: do not early-return here to keep Hooks order stable.
   // WebSockets
   const wsMain = useAppWebSocket('/ws', token);
   const wsBazaar = useAppWebSocket('/wsb', token);
@@ -501,9 +510,12 @@ function Main() {
     requestAnimationFrame(check);
   };
   const handleLogout = () => {
+    // Ask server to drop session and close sockets; then clear JWT and re-render Login
     try { wsMain.send('destroySession'); } catch {}
-    localStorage.removeItem('jwt');
-    location.href = '/';
+    try { wsMain.wsRef?.current?.close?.(); } catch {}
+    try { wsBazaar.wsRef?.current?.close?.(); } catch {}
+    try { localStorage.removeItem('jwt'); } catch {}
+    setToken(null);
   };
 
   const handleStoreLogsAndRefresh = async (setStoreProgress) => {
@@ -658,6 +670,23 @@ function Main() {
   });
 
   // Anciennes fonctions openMarketForItem / sendPriceNotification supprimées (gérées côté hook)
+  // Late conditional returns (after all hooks) to avoid Hook order mismatches
+  if (location && location.pathname === '/public-bazaar') {
+    return (
+      <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
+        <PublicBazaarPage />
+      </Suspense>
+    );
+  }
+  if (!token) {
+    return (
+      <StrictMode>
+        <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
+          <Login darkMode={true} />
+        </Suspense>
+      </StrictMode>
+    );
+  }
   return (
     <div className={`app-root ${darkMode ? 'dark-mode' : 'light-mode'}`}>
       {/* Indicateurs activité WebSocket principale */}
@@ -718,35 +747,57 @@ function Main() {
             >
               Theme
             </button>
+            <Link
+              to="/memory"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="Memory MCP view"
+            >
+              Memory
+            </Link>
           </div>
         </div>
-      {/* Tableau bazaar réutilisable (lazy) */}
-      <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
-        <BazaarTable
-          bazaarRows={bazaarRows}
-          watchedItems={watchedItems}
-          priceThresholds={priceThresholds}
-          blinkingItems={blinkingItems}
-          onThresholdChange={(itemId, value) => {
-            setPriceThresholds(prev => {
-              const updated = { ...prev, [itemId]: value };
-              try { localStorage.setItem('priceThresholds', JSON.stringify(updated)); } catch(_) {}
-              return updated;
-            });
-          }}
-          onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch(_) {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
-          sendWs={sendWithPulse}
-        />
-      </Suspense>
+      {!isMemoryPage && (
+        <>
+          {/* Tableau bazaar réutilisable (lazy) */}
+          <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
+            <BazaarTable
+              bazaarRows={bazaarRows}
+              watchedItems={watchedItems}
+              priceThresholds={priceThresholds}
+              blinkingItems={blinkingItems}
+              onThresholdChange={(itemId, value) => {
+                setPriceThresholds(prev => {
+                  const updated = { ...prev, [itemId]: value };
+                  try { localStorage.setItem('priceThresholds', JSON.stringify(updated)); } catch(_) {}
+                  return updated;
+                });
+              }}
+              onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch(_) {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
+              sendWs={sendWithPulse}
+            />
+          </Suspense>
+        </>
+      )}
     <Routes>
-  <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
-  <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
+      <Route
+        path="/memory"
+        element={(
+          <Suspense fallback={<div style={{ padding: 20 }}>Chargement mémoire…</div>}>
+            <MemoryGraphExplorer darkMode={darkMode} />
+          </Suspense>
+        )}
+      />
+      <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
+      <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
     </Routes>
-  {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
-  <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />
-  {/* Barre d'outils et modals */}
+  {!isMemoryPage && (
+    <>
+      {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
+      <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />
+      {/* Barre d'outils et modals */}
 
-  <div className="row mb-4 align-items-start">
+      <div className="row mb-4 align-items-start">
         <div className="col-auto d-flex align-items-end" style={{gap:6}}>
           <div className="d-flex flex-column" style={{width:130}}>
             <label className="form-label mb-1" style={{fontSize:12}}>From</label>
@@ -880,7 +931,9 @@ function Main() {
             </div>
           )}
         </div>
-  </div>
+      </div>
+    </>
+  )}
   {/* Modal for Autocomplete */}
       {showAutocomplete && (
         <div

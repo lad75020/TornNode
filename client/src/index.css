@@ -12,6 +12,7 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
 /* h5 encadré d'une boîte couleur primaire Bootstrap, largeur 100%, texte à gauche */
 h5 {
   width: 100%;

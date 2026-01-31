@@ -24,3 +24,5 @@ memory-quality.json
 memory-report.html
 client/dist/**
 scripts/compareClothingItems.js
+tornnode.code-workspace
+scripts/fetchClothingItems.js

@@ -39,7 +39,7 @@ const port = (typeof argv.port === 'number' && !Number.isNaN(argv.port))
     : 3110;
 const host = argv.host || 'localhost';
 const https = argv.https;
-const log = argv.log || false;
+const log = true;//argv.log || false;
 // Mode single-thread: suppression de cluster/multithreading
 const isTest = argv.test || false;
 const MONGO_URI = isTest ? process.env.MONGODB_URI_TEST : process.env.MONGODB_URI;
@@ -81,7 +81,7 @@ socketEvents.on('newSocket', async (socket, req) => {
 });
 
 const fastify = require('fastify')({
-    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/test.log', base: { service: 'tonstatsdubbo' } } : false,
+    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
     trustProxy: true
 });
 
@@ -98,7 +98,7 @@ const dailyPriceAverager = require('./dailyPriceAverager.cjs');
 const fastifyRedis = require('@fastify/redis');
 
 fastify.register(fastifyCors, {
-    origin: ['https://torn.dubertrand.fr', 'https://rpi5.dubertrand.corp'],
+    origin: true,
     credentials: true
 });
 fastify.register(fastifyCompress);
@@ -202,6 +202,7 @@ fastify.register(require('@fastify/mongodb'), {
         fastify.register(require('./ws/wsBazaarPrice.cjs'));
         require('./routes/authenticate.cjs')(fastify, isTest);
         require('./routes/subscribe.cjs')(fastify, isTest);
+        require('./routes/memoryMcp.cjs')(fastify);
         //require('./routes/Utils.cjs')(fastify, isTest, chartType);
         require('./routes/wsHandler.cjs')(fastify, isTest);
    });    
@@ -221,10 +222,16 @@ fastify.register(require('@fastify/mongodb'), {
             return;
         }
 
+        // Root route: serve SPA if authenticated, otherwise serve static login page
         fastify.get('/', (req, reply) => {
-            if (req.session && req.session.TornAPIKey)
-                return reply.html();
-            return reply.redirect('/');
+            try {
+
+                    return reply.html();
+  
+            } catch (e) {
+                try { fastify.log && fastify.log.error('[root] handler error: ' + e.message); } catch {}
+                return reply.code(500).send('Internal Server Error');
+            }
         });
     });
     // Warmup amélioré (instrumentation + validation)
@@ -276,6 +283,3 @@ fastify.register(require('@fastify/mongodb'), {
     });
 
     scheduleDailyAverageJob();
-
-
-

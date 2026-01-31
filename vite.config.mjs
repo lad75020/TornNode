@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
@@ -17,7 +18,8 @@ export default defineConfig(({ mode }) => {
           }
         }
       },
-      chunkSizeWarningLimit: 900
+      chunkSizeWarningLimit: 900,
+      preview: {port: 4173, host: 'localhost', allowedHosts:'rpi5.dubertrand.corp'}
     }
   };
 });

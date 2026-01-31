@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable no-empty */
 module.exports = async function wsUpdatePrice(socket, req, fastify, parsed, redisClient, opts = {}) {
   const { isTest = false } = opts;
 
@@ -15,7 +17,14 @@ module.exports = async function wsUpdatePrice(socket, req, fastify, parsed, redi
     if (typeof suppliedPrice === 'number' && suppliedPrice >= 0) {
       price = Math.floor(suppliedPrice);
     } else {
-      const apiResp = await fetch(`${process.env.TORN_API_URL}market/${idInt}/itemmarket?key=${req.session.TornAPIKey}&offset=0`);
+      // Fallback to env API key if none in session (public flows)
+      const apiKey = (req && req.session && req.session.TornAPIKey) || process.env.TORN_API_KEY;
+      if (!apiKey) {
+        throw new Error('Missing Torn API key');
+      }
+      const url = `${process.env.TORN_API_URL}market/${idInt}/itemmarket?offset=0`;
+      const headers = { 'Authorization': `ApiKey ${apiKey}` };
+      const apiResp = await fetch(url, { headers });
       const data = await apiResp.json();
       price = data?.itemmarket?.listings?.[0]?.price;
     }

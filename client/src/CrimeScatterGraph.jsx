@@ -31,7 +31,8 @@ export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight =
         const skill = obj.data && typeof obj.data.skill_level === 'number' ? obj.data.skill_level : null;
         if (skill !== null) {
           if (!pointsByCrime[crime]) pointsByCrime[crime] = [];
-          pointsByCrime[crime].push({ x: obj.timestamp, y: skill });
+          // Convert seconds to milliseconds for Chart.js time scale
+          pointsByCrime[crime].push({ x: obj.timestamp * 1000, y: skill });
         }
       }
       // Determine global earliest timestamp (for min date persistence)
@@ -42,7 +43,7 @@ export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight =
         }
       }
       if (earliestTs && onMinDate) {
-        const day = new Date(earliestTs * 1000).toISOString().slice(0,10);
+        const day = new Date(earliestTs).toISOString().slice(0,10);
         if (/^\d{4}-\d{2}-\d{2}$/.test(day)) { try { onMinDate(day); } catch {} }
       }
       // Prepare datasets for each crime with date range filtering (day-based)
@@ -50,7 +51,7 @@ export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight =
         // Trier par timestamp pour que la ligne connecte dans l'ordre temporel
         points.sort((a,b) => a.x - b.x);
         const filteredPoints = (dateFrom || dateTo) ? points.filter(p => {
-          const day = new Date(p.x * 1000).toISOString().slice(0,10);
+          const day = new Date(p.x).toISOString().slice(0,10);
           if (dateFrom && day < dateFrom) return false;
           if (dateTo && day > dateTo) return false;
           return true;
@@ -95,9 +96,10 @@ export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight =
               },
               scales: {
                 x: {
-                  title: { display: true, text: 'Timestamp (Unix seconds)' },
-                  type: 'linear',
-                  beginAtZero: false,
+                  title: { display: true, text: 'Date' },
+                  type: 'time',
+                  time: { unit: 'day', displayFormats: { day: 'yyyy-MM-dd' }, tooltipFormat: 'yyyy-MM-dd' },
+                  ticks: { source: 'auto', maxRotation: 0, autoSkip: true },
                 },
                 y: {
                   title: { display: true, text: 'Crime skills' },

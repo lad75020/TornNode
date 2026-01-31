@@ -1,7 +1,4 @@
 {
-    // Utilisez IntelliSense pour en savoir plus sur les attributs possibles.
-    // Pointez pour afficher la description des attributs existants.
-    // Pour plus d'informations, visitez : https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         
@@ -12,7 +9,7 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/tonstatsdubbo.js",
+            "program": "${workspaceFolder}/server.cjs",
             "args": [
                 "--log",
                 "--port",
@@ -20,10 +17,9 @@
                 "--https",
                 "--host",
                 "127.0.0.1",
-                "--bootstrap",
                 "--test"
             ],
-            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.6.0/bin/node"
+            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v25.2.1/bin/node"
         }
     ,
         
@@ -35,18 +31,7 @@
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}/fetchAllStatsAndInsert.js",
-            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.5.0/bin/node"
-        },
-        
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "COmpare Items in Display",
-            "skipFiles": [
-                "<node_internals>/**"
-            ],
-            "program": "${workspaceFolder}/scripts/compareClothingItems.js",
-            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v24.8.0/bin/node"
+            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v25.2.1/bin/node"
         }
     ]
 }

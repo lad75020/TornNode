@@ -102,7 +102,15 @@ export default function CompanyProfileChart({ sendWs, wsMessages, chartHeight = 
     responsive:true, maintainAspectRatio:false,
     interaction:{ mode:'index', intersect:false },
     scales:{
-      x:{ type:'time', time:{ unit:'hour', tooltipFormat:'PPpp' } },
+      x:{
+        type:'time',
+        time:{
+          unit:'day',
+          displayFormats: { day: 'yyyy-MM-dd' },
+          tooltipFormat:'PPpp'
+        },
+        ticks: { source: 'auto', maxRotation: 0, autoSkip: true }
+      },
       y:{ }
     }
   });
@@ -130,9 +138,7 @@ export default function CompanyProfileChart({ sendWs, wsMessages, chartHeight = 
         <div style={{ flex:2, minWidth:0 }}>
           <Line data={lineData} options={lineOptions} />
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <Bar data={barData} options={barOptions} />
-        </div>
+
       </div>
       {profile && (
         <div style={{ marginTop:8, fontSize:12, opacity:0.85 }}>

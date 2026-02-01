@@ -98,7 +98,7 @@ const dailyPriceAverager = require('./dailyPriceAverager.cjs');
 const fastifyRedis = require('@fastify/redis');
 
 fastify.register(fastifyCors, {
-    origin: ['https://torn.dubertrand.fr', 'https://rpi5.dubertrand.corp'],
+    origin: true,
     credentials: true
 });
 fastify.register(fastifyCompress);
@@ -202,6 +202,7 @@ fastify.register(require('@fastify/mongodb'), {
         fastify.register(require('./ws/wsBazaarPrice.cjs'));
         require('./routes/authenticate.cjs')(fastify, isTest);
         require('./routes/subscribe.cjs')(fastify, isTest);
+        require('./routes/memoryMcp.cjs')(fastify);
         //require('./routes/Utils.cjs')(fastify, isTest, chartType);
         require('./routes/wsHandler.cjs')(fastify, isTest);
    });    
@@ -282,5 +283,3 @@ fastify.register(require('@fastify/mongodb'), {
     });
 
     scheduleDailyAverageJob();
-
-

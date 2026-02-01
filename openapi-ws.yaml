@@ -1,0 +1,750 @@
+openapi: 3.1.0
+info:
+  title: Tornnode WebSocket API (OpenAPI-like)
+  version: 0.1.0
+  description: |
+    OpenAPI-like description of WebSocket endpoints exposed by this app.
+    This is not a strict OpenAPI schema for WebSockets; it uses vendor
+    extensions (x-*) to describe message flows.
+servers:
+  - url: ws://{host}
+    description: Local websocket
+    variables:
+      host:
+        default: localhost:3110
+  - url: wss://{host}
+    description: TLS websocket
+    variables:
+      host:
+        default: torn.dubertrand.fr
+paths:
+  /ws:
+    get:
+      summary: Main WebSocket endpoint
+      description: |
+        WebSocket endpoint for authenticated app operations. JWT token is
+        accepted via query parameter. Session cookie provides TornAPIKey and
+        userID for most operations.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: JWT used by verifyClient; connection is not rejected if invalid.
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade
+      x-websocket: true
+      x-auth:
+        jwtQueryParam: token
+        sessionCookie: true
+      x-keepalive:
+        pingIntervalMsEnv: WS_PING_INTERVAL_MS
+        pongTimeoutMsEnv: WS_PONG_TIMEOUT_MS
+      x-messages:
+        clientToServer:
+          - name: ping
+            type: text
+            description: Keepalive ping. Server replies with plain text "pong".
+          - name: torn
+            type: text
+            description: Import Torn logs; emits importProgress and importedData.
+          - name: tornAttacks
+            type: text
+            description: Import attacks; may defer until logs import completes.
+          - name: checkSession
+            type: text
+            description: Returns whether session has TornAPIKey.
+          - name: networth
+            type: text
+            description: Insert networth snapshot (if no recent entry <12h).
+          - name: stats
+            type: text
+            description: Triggers companyStock, companyProfile, companyDetails, statsInsert.
+          - name: destroySession
+            type: text
+            description: Destroys session; no response payload.
+          - name: deduplicate
+            type: text
+            description: Calls wsDeduplicate (not present in repo).
+          - name: racingskill
+            type: text
+            description: Fetch racing skill history.
+          - name: lastNetworth
+            type: text
+            description: Fetch last networth stats from Stats collection.
+          - name: getNetworth
+            type: text
+            description: Fetch networth history.
+          - name: dailyPriceAveragesAll
+            type: text
+            description: Fetch all daily price averages (public/aggregated).
+          - name: companyTrainRange
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyTrainRangeRequest"
+          - name: getTornAttacks
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetTornAttacksRequest"
+          - name: updatePrice
+            type: json
+            schema:
+              $ref: "#/components/schemas/UpdatePriceRequest"
+          - name: getAllTornItems
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetAllTornItemsRequest"
+          - name: getAllTornLogs
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetAllTornLogsRequest"
+          - name: stopImport
+            type: json
+            schema:
+              $ref: "#/components/schemas/StopImportRequest"
+          - name: dailyPriceAverage
+            type: json
+            schema:
+              $ref: "#/components/schemas/DailyPriceAverageRequest"
+          - name: companyStock
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyStockRequest"
+          - name: getCompanyStock
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyStockRequest"
+          - name: getCompanyStockHistory
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyStockHistoryRequest"
+          - name: companyProfile
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyProfileRequest"
+          - name: getCompanyProfile
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyProfileRequest"
+          - name: getCompanyProfileHistory
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyProfileHistoryRequest"
+          - name: companyDetails
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyDetailsRequest"
+          - name: getCompanyDetailsHistory
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyDetailsHistoryRequest"
+        serverToClient:
+          - name: session
+            type: json
+            schema:
+              $ref: "#/components/schemas/SessionMessage"
+          - name: auth
+            type: json
+            schema:
+              $ref: "#/components/schemas/AuthErrorMessage"
+          - name: importProgress
+            type: json
+            schema:
+              $ref: "#/components/schemas/ImportProgressMessage"
+          - name: importedData
+            type: json
+            schema:
+              $ref: "#/components/schemas/ImportedDataMessage"
+          - name: importStopped
+            type: json
+            schema:
+              $ref: "#/components/schemas/ImportStoppedMessage"
+          - name: deferred
+            type: json
+            schema:
+              $ref: "#/components/schemas/DeferredMessage"
+          - name: checkSession
+            type: json
+            schema:
+              $ref: "#/components/schemas/CheckSessionMessage"
+          - name: networthInsert
+            type: json
+            schema:
+              $ref: "#/components/schemas/NetworthInsertMessage"
+          - name: statsInsert
+            type: json
+            schema:
+              $ref: "#/components/schemas/StatsInsertMessage"
+          - name: racingskill
+            type: json
+            schema:
+              $ref: "#/components/schemas/RacingSkillMessage"
+          - name: lastNetworth
+            type: json
+            schema:
+              $ref: "#/components/schemas/LastNetworthMessage"
+          - name: getNetworth
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetNetworthMessage"
+          - name: dailyPriceAveragesAll
+            type: json
+            schema:
+              $ref: "#/components/schemas/DailyPriceAveragesAllMessage"
+          - name: dailyPriceAverage
+            type: json
+            schema:
+              $ref: "#/components/schemas/DailyPriceAverageMessage"
+          - name: companyStock
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyStockMessage"
+          - name: companyProfile
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyProfileMessage"
+          - name: companyDetails
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyDetailsMessage"
+          - name: getCompanyStock
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyStockMessage"
+          - name: getCompanyStockHistory
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyStockHistoryMessage"
+          - name: getCompanyProfile
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyProfileMessage"
+          - name: getCompanyProfileHistory
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyProfileHistoryMessage"
+          - name: getCompanyDetailsHistory
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetCompanyDetailsHistoryMessage"
+          - name: getAllTornItems
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetAllTornItemsMessage"
+          - name: getAllTornLogs
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetAllTornLogsMessage"
+          - name: getTornAttacks
+            type: json
+            schema:
+              $ref: "#/components/schemas/GetTornAttacksMessage"
+          - name: updatePrice
+            type: json
+            schema:
+              $ref: "#/components/schemas/UpdatePriceMessage"
+          - name: companyTrainRange
+            type: json
+            schema:
+              $ref: "#/components/schemas/CompanyTrainRangeMessage"
+          - name: unknown
+            type: text
+            description: Plain text "Unknown message" for unrecognized commands.
+  /wsb:
+    get:
+      summary: Bazaar price WebSocket endpoint
+      description: |
+        Streams price updates for watched item IDs. Uses server API key
+        (TORN_API_KEY) and does not require auth.
+      responses:
+        "101":
+          description: WebSocket upgrade
+      x-websocket: true
+      x-keepalive:
+        pingIntervalMsEnv: WSB_PING_INTERVAL_MS
+        pongTimeoutMsEnv: WSB_PONG_TIMEOUT_MS
+      x-messages:
+        clientToServer:
+          - name: watch
+            type: json
+            schema:
+              $ref: "#/components/schemas/WatchRequest"
+          - name: unwatch
+            type: json
+            schema:
+              $ref: "#/components/schemas/UnwatchRequest"
+        serverToClient:
+          - name: welcome
+            type: json
+            schema:
+              $ref: "#/components/schemas/WelcomeMessage"
+          - name: watchList
+            type: json
+            schema:
+              $ref: "#/components/schemas/WatchListMessage"
+          - name: watchAck
+            type: json
+            schema:
+              $ref: "#/components/schemas/WatchAckMessage"
+          - name: unwatchAck
+            type: json
+            schema:
+              $ref: "#/components/schemas/UnwatchAckMessage"
+          - name: priceUpdate
+            type: json
+            schema:
+              $ref: "#/components/schemas/PriceUpdateMessage"
+components:
+  schemas:
+    SessionMessage:
+      type: object
+      required: [type, userID, time]
+      properties:
+        type: { const: session }
+        userID: { type: [number, string] }
+        time: { type: integer, description: "epoch ms" }
+    AuthErrorMessage:
+      type: object
+      required: [type, ok, error]
+      properties:
+        type: { const: auth }
+        ok: { const: false }
+        error: { type: string }
+
+    ImportProgressMessage:
+      type: object
+      required: [type, kind]
+      properties:
+        type: { const: importProgress }
+        kind: { enum: [logs, attacks] }
+        percent: { type: number }
+        currentTs: { type: integer, description: "epoch seconds" }
+        startTs: { type: integer, description: "epoch seconds" }
+        endTs: { type: integer, description: "epoch seconds" }
+        inserted: { type: integer }
+        error: { type: string }
+    ImportedDataMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { const: importedData }
+        logsImported: { type: integer }
+        attacksImported: { type: integer }
+    ImportStoppedMessage:
+      type: object
+      required: [type, kind]
+      properties:
+        type: { const: importStopped }
+        kind: { enum: [logs, attacks] }
+        percent: { type: [number, "null"] }
+    DeferredMessage:
+      type: object
+      required: [type, reason, target]
+      properties:
+        type: { const: deferred }
+        reason: { type: string }
+        target: { type: string }
+        progress: { type: number }
+
+    CheckSessionMessage:
+      type: object
+      required: [session_active]
+      properties:
+        session_active: { type: boolean }
+
+    NetworthInsertMessage:
+      type: object
+      required: [type, ok, inserted]
+      properties:
+        type: { const: networthInsert }
+        ok: { type: boolean }
+        inserted: { type: boolean }
+        reason: { type: string }
+        lastDate: { type: string }
+        value: { type: number }
+        date: { type: string }
+        error: { type: string }
+        time: { type: integer }
+
+    StatsInsertMessage:
+      type: object
+      required: [type, ok, inserted]
+      properties:
+        type: { const: statsInsert }
+        ok: { type: boolean }
+        inserted: { type: boolean }
+        reason: { type: string }
+        lastDate: { type: string }
+        message: { type: string }
+        error: { type: string }
+        time: { type: integer }
+
+    RacingSkillMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { const: racingskill }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              racingskill: { type: number }
+        error: { type: string }
+
+    LastNetworthMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { const: lastNetworth }
+        date: { type: string }
+        networth: { type: object, additionalProperties: true }
+        error: { type: string }
+
+    GetNetworthMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getNetworth }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              value: { type: number }
+        error: { type: string }
+
+    DailyPriceAveragesAllMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: dailyPriceAveragesAll }
+        ok: { type: boolean }
+        lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        error: { type: string }
+
+    DailyPriceAverageMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: dailyPriceAverage }
+        ok: { type: boolean }
+        time: { type: integer }
+        error: { type: string }
+
+    CompanyStockMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: companyStock }
+        ok: { type: boolean }
+        stock: { type: [array, object] }
+        timestamp: { type: integer, description: "epoch ms" }
+        reused: { type: boolean }
+        inserted: { type: boolean }
+        stale: { type: boolean }
+        error: { type: string }
+
+    CompanyProfileMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: companyProfile }
+        ok: { type: boolean }
+        profile: { type: [object, "null"] }
+        timestamp: { type: integer }
+        reused: { type: boolean }
+        inserted: { type: boolean }
+        stale: { type: boolean }
+        error: { type: string }
+
+    CompanyDetailsMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: companyDetails }
+        ok: { type: boolean }
+        details: { type: [object, "null"] }
+        timestamp: { type: integer }
+        reused: { type: boolean }
+        inserted: { type: boolean }
+        stale: { type: boolean }
+        debug: { type: object }
+        error: { type: string }
+
+    GetCompanyStockMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: getCompanyStock }
+        ok: { type: boolean }
+        stock: { type: [array, object] }
+        timestamp: { type: integer }
+        empty: { type: boolean }
+        error: { type: string }
+
+    GetCompanyStockHistoryMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: getCompanyStockHistory }
+        ok: { type: boolean }
+        series: { type: object, additionalProperties: true }
+        meta: { type: object, additionalProperties: true }
+        error: { type: string }
+
+    GetCompanyProfileMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: getCompanyProfile }
+        ok: { type: boolean }
+        profile: { type: [object, "null"] }
+        timestamp: { type: integer }
+        empty: { type: boolean }
+        error: { type: string }
+
+    GetCompanyProfileHistoryMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: getCompanyProfileHistory }
+        ok: { type: boolean }
+        series: { type: object, additionalProperties: true }
+        lastTimestamp: { type: integer }
+        metricsRank: { type: array, items: { type: object } }
+        meta: { type: object }
+        error: { type: string }
+
+    GetCompanyDetailsHistoryMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: getCompanyDetailsHistory }
+        ok: { type: boolean }
+        series: { type: object, additionalProperties: true }
+        lastTimestamp: { type: integer }
+        meta: { type: object }
+        error: { type: string }
+
+    GetAllTornItemsMessage:
+      type: object
+      required: [type, ok]
+      properties:
+        type: { const: getAllTornItems }
+        ok: { type: boolean }
+        items: { type: array, items: { type: object } }
+        error: { type: string }
+
+    GetAllTornLogsMessage:
+      type: object
+      properties:
+        type: { const: getAllTornLogs }
+        phase: { type: string, enum: [start, batch, end] }
+        from: { type: integer }
+        to: { type: integer }
+        total: { type: integer }
+        batchSize: { type: integer }
+        batch: { type: array, items: { type: object } }
+        sent: { type: integer }
+        requestId: {}
+        ok: { type: boolean }
+        error: { type: string }
+
+    GetTornAttacksMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getTornAttacks }
+        from: { type: integer }
+        to: { type: integer }
+        wins: { type: integer }
+        losses: { type: integer }
+        attacks: { type: integer }
+        defends: { type: integer }
+        error: { type: string }
+
+    UpdatePriceMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { const: updatePrice }
+        ok: { type: boolean }
+        id: { type: integer }
+        price: { type: [integer, "null"] }
+        cache: { type: string }
+        error: { type: string }
+
+    CompanyTrainRangeMessage:
+      type: object
+      properties:
+        type: { const: companyTrainRange }
+        from: { type: integer }
+        to: { type: integer }
+        data: { type: array, items: { type: object } }
+        error: { type: string }
+
+    WelcomeMessage:
+      type: object
+      required: [type, time]
+      properties:
+        type: { const: welcome }
+        time: { type: integer }
+    WatchListMessage:
+      type: object
+      required: [type, items]
+      properties:
+        type: { const: watchList }
+        items: { type: array, items: { type: integer } }
+    WatchAckMessage:
+      type: object
+      required: [type, itemId, total]
+      properties:
+        type: { const: watchAck }
+        itemId: { type: integer }
+        total: { type: integer }
+        already: { type: boolean }
+    UnwatchAckMessage:
+      type: object
+      required: [type, itemId, total]
+      properties:
+        type: { const: unwatchAck }
+        itemId: { type: integer }
+        total: { type: integer }
+        missing: { type: boolean }
+    PriceUpdateMessage:
+      type: object
+      required: [type, time, itemId]
+      properties:
+        type: { const: priceUpdate }
+        time: { type: integer }
+        itemId: { type: integer }
+        itemName: { type: [string, "null"] }
+        minBazaar: { type: [number, "null"] }
+        listings:
+          type: array
+          items:
+            type: object
+            properties:
+              price: { type: number }
+              quantity: { type: number }
+
+    CompanyTrainRangeRequest:
+      type: object
+      required: [type, from, to]
+      properties:
+        type: { const: companyTrainRange }
+        from: { type: integer, description: "epoch seconds" }
+        to: { type: integer, description: "epoch seconds" }
+    GetTornAttacksRequest:
+      type: object
+      required: [type, from, to]
+      properties:
+        type: { const: getTornAttacks }
+        from: { type: integer, description: "epoch seconds" }
+        to: { type: integer, description: "epoch seconds" }
+    UpdatePriceRequest:
+      type: object
+      required: [type, id]
+      properties:
+        type: { const: updatePrice }
+        id: { type: integer }
+        price: { type: number }
+    GetAllTornItemsRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getAllTornItems }
+    GetAllTornLogsRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getAllTornLogs }
+        from: { type: integer }
+        to: { type: integer }
+        batchSize: { type: integer }
+        requestId: {}
+    StopImportRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: stopImport }
+        kinds:
+          type: array
+          items: { type: string, enum: [logs, attacks] }
+    DailyPriceAverageRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: dailyPriceAverage }
+    CompanyStockRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: companyStock }
+    GetCompanyStockRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getCompanyStock }
+    GetCompanyStockHistoryRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getCompanyStockHistory }
+        from: { type: integer }
+        to: { type: integer }
+        top: { type: integer, minimum: 1, maximum: 50 }
+    CompanyProfileRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: companyProfile }
+    GetCompanyProfileRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getCompanyProfile }
+    GetCompanyProfileHistoryRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getCompanyProfileHistory }
+        from: { type: integer, description: "epoch ms" }
+        to: { type: integer, description: "epoch ms" }
+    CompanyDetailsRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: companyDetails }
+        force: { type: boolean }
+        forceFetch: { type: boolean }
+        reuseMinutes: { type: number, minimum: 0 }
+        debug: { type: boolean }
+    GetCompanyDetailsHistoryRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { const: getCompanyDetailsHistory }
+        from: { type: integer }
+        to: { type: integer }
+    WatchRequest:
+      type: object
+      required: [type, itemId]
+      properties:
+        type: { const: watch }
+        itemId: { type: integer }
+    UnwatchRequest:
+      type: object
+      required: [type, itemId]
+      properties:
+        type: { const: unwatch }
+        itemId: { type: integer }

@@ -222,6 +222,10 @@ function buildIndex() {
 }
 
 async function pushToMcp(index) {
+  if (process.env.MEMORY_MCP_DISABLE_LEGACY_PUSH === '1') {
+    console.log('[memory] legacy push disabled, skipping internal uploader');
+    return;
+  }
   const endpoint = process.env.MEMORY_MCP_ENDPOINT;
   const namespace = process.env.MEMORY_MCP_NAMESPACE || 'tornnode';
   if (!endpoint || process.env.DRY_RUN === 'true') {

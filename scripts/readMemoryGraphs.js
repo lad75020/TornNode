@@ -3,14 +3,80 @@
  * readMemoryGraphs.js
  * Récupère les graphes / entités depuis le serveur MCP Memory.
  *
- * Env attendus:
- *  MEMORY_MCP_ENDPOINT (ex: https://memory.local/api)
- *  MEMORY_MCP_NAMESPACE (optionnel filtre)
+ * Modes:
+ *  - JSON-RPC (streamable HTTP) si MEMORY_MCP_ENDPOINT finit par /mcp ou si MEMORY_MCP_USE_RPC=1
+ *  - Fallback HTTP legacy (/read_graph) sinon
+ *
+ * Env:
+ *  MEMORY_MCP_ENDPOINT (ex: http://192.168.1.80:3176/mcp)
+ *  MEMORY_MCP_NAMESPACE (optionnel)
  *  MEMORY_MCP_API_KEY (optionnel)
- *  MEMORY_MCP_PATH_READ (override chemin, défaut: /read_graphs ou /graphs)
  */
+
+'use strict';
+
 const fs = require('fs');
 const path = require('path');
+const { createMcpClient, extractGraphFromReadGraphResult } = require('./mcpRpcClient.cjs');
+
+async function readViaRpc(endpoint, namespace, apiKey) {
+  const client = createMcpClient({
+    endpoint,
+    apiKey,
+    clientInfo: { name: 'memory-read-script', version: '1.0.0' }
+  });
+  await client.initialize();
+  const args = namespace ? { namespace } : {};
+  const res = await client.toolsCall('read_graph', args);
+  return extractGraphFromReadGraphResult(res);
+}
+
+async function readViaLegacy(endpoint, namespace, apiKey) {
+  const base = endpoint.replace(/\/$/, '');
+  const candidates = ['/read_graph'];
+
+  for (const c of candidates) {
+    const baseUrl = base + c;
+    const url = baseUrl + (namespace ? `?namespace=${encodeURIComponent(namespace)}` : '');
+
+    // GET
+    try {
+      console.log(`[memory:read] TRY GET ${c}`);
+      const res = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+        }
+      });
+      if (res.ok) return res.json();
+      const txt = await res.text();
+      console.warn(`[memory:read] fail GET path=${c} status=${res.status} body=${txt.slice(0, 160)}`);
+    } catch (e) {
+      console.warn('[memory:read] error GET path=' + c + ' err=' + e.message);
+    }
+
+    // POST
+    try {
+      console.log(`[memory:read] TRY POST ${c}`);
+      const res = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+        },
+        body: JSON.stringify({ namespace })
+      });
+      if (res.ok) return res.json();
+      const txt = await res.text();
+      console.warn(`[memory:read] fail POST path=${c} status=${res.status} body=${txt.slice(0, 160)}`);
+    } catch (e) {
+      console.warn('[memory:read] error POST path=' + c + ' err=' + e.message);
+    }
+  }
+
+  throw new Error('aucun endpoint legacy n\'a répondu avec succès');
+}
 
 async function main() {
   const endpoint = process.env.MEMORY_MCP_ENDPOINT;
@@ -18,77 +84,40 @@ async function main() {
     console.error('MEMORY_MCP_ENDPOINT manquant');
     process.exit(1);
   }
-  const base = endpoint.replace(/\/$/, '');
+
   const namespace = process.env.MEMORY_MCP_NAMESPACE;
   const apiKey = process.env.MEMORY_MCP_API_KEY;
-  const custom = process.env.MEMORY_MCP_PATH_READ;
-  const candidates = [
-    '/read_graph'
-  ].filter(Boolean);
 
   // Argument simple --id <fragment>
-  const argIndex = process.argv.indexOf('--id');
-  const idFilter = argIndex !== -1 ? process.argv[argIndex + 1] : null;
+  const args = process.argv.slice(2);
+  const argIndex = args.indexOf('--id');
+  const idFilter = argIndex !== -1 ? args[argIndex + 1] : null;
 
-  for (const c of candidates) {
-    const baseUrl = base + c;
-    const url = baseUrl + (namespace ? `?namespace=${encodeURIComponent(namespace)}` : '');
-    // Tentative GET
-    try {
-      console.log(`[memory:read] TRY GET ${c}`);
-      const res = await fetch(url, { headers: { 'Accept': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) } });
-      if (res.ok) {
-        const json = await res.json();
-        let data = json;
-        if (idFilter) {
-          const arr = Array.isArray(json) ? json : (json.entities || json.graphs || json.items || []);
-            data = arr.filter(e => typeof e.id === 'string' && e.id.includes(idFilter));
-        }
-        const out = path.join(process.cwd(), 'memory-graphs.json');
-        fs.writeFileSync(out, JSON.stringify(data, null, 2));
-        console.log(`[memory:read] success GET path=${c} -> ${out} (count=${Array.isArray(data)?data.length:'n/a'})`);
-        return;
-      } else {
-        const txt = await res.text();
-        console.warn(`[memory:read] fail GET path=${c} status=${res.status} body=${txt.slice(0,160)}`);
-      }
-    } catch (e) {
-      console.warn('[memory:read] error GET path=' + c + ' err=' + e.message);
-    }
+  const preferRpc = process.env.MEMORY_MCP_USE_RPC === '1' || /\/mcp(\/|$)/.test(endpoint);
 
-    // Fallback POST (certains serveurs attendent le namespace en body)
-    try {
-      console.log(`[memory:read] TRY POST ${c}`);
-      const resP = await fetch(baseUrl, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-        },
-        body: JSON.stringify({ namespace })
-      });
-      if (resP.ok) {
-        const json = await resP.json();
-        let data = json;
-        if (idFilter) {
-          const arr = Array.isArray(json) ? json : (json.entities || json.graphs || json.items || []);
-          data = arr.filter(e => typeof e.id === 'string' && e.id.includes(idFilter));
-        }
-        const out = path.join(process.cwd(), 'memory-graphs.json');
-        fs.writeFileSync(out, JSON.stringify(data, null, 2));
-        console.log(`[memory:read] success POST path=${c} -> ${out} (count=${Array.isArray(data)?data.length:'n/a'})`);
-        return;
-      } else {
-        const txt = await resP.text();
-        console.warn(`[memory:read] fail POST path=${c} status=${resP.status} body=${txt.slice(0,160)}`);
-      }
-    } catch (e) {
-      console.warn('[memory:read] error POST path=' + c + ' err=' + e.message);
-    }
+  let data;
+  if (preferRpc) {
+    data = await readViaRpc(endpoint, namespace, apiKey);
+    console.log('[memory:read] success MCP');
+  } else {
+    data = await readViaLegacy(endpoint, namespace, apiKey);
+    console.log('[memory:read] success legacy');
   }
-  console.error('[memory:read] aucun endpoint n\'a répondu avec succès');
-  process.exit(2);
+
+  // Normaliser filtrage
+  if (idFilter) {
+    const arr = Array.isArray(data) ? data : (data.entities || data.graphs || data.items || []);
+    data = arr.filter(e => typeof e.id === 'string' && e.id.includes(idFilter));
+  }
+
+  const out = path.join(process.cwd(), 'memory-graphs.json');
+  fs.writeFileSync(out, JSON.stringify(data, null, 2));
+
+  const count = Array.isArray(data) ? data.length : (Array.isArray(data.entities) ? data.entities.length : 'n/a');
+  console.log(`[memory:read] écrit ${out} (count=${count})`);
 }
 
-main();
+main().catch(err => {
+  console.error('[memory:read] erreur', err.message);
+  process.exit(2);
+});

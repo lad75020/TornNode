@@ -205,6 +205,10 @@ function generateRelations(entities) {
 }
 
 async function pushRelations(relations){
+  if (process.env.MEMORY_MCP_DISABLE_LEGACY_PUSH === '1') {
+    console.log('[memory:relations] legacy push disabled, skipping internal uploader');
+    return false;
+  }
   const endpoint = process.env.MEMORY_MCP_ENDPOINT;
   const apiKey = process.env.MEMORY_MCP_API_KEY;
   const pathRel = process.env.MEMORY_MCP_PATH_REL || '/create_relations';

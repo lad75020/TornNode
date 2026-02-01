@@ -14,6 +14,7 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Link,
   useNavigate,
   useParams,
   useLocation
@@ -59,6 +60,7 @@ const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
+const MemoryGraphExplorer = lazy(() => import('./MemoryGraphExplorer.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -225,6 +227,7 @@ const chartComponents = [
 
 function Main() {
   const location = useLocation();
+  const isMemoryPage = location.pathname.startsWith('/memory');
   // Track auth token in state so UI reacts immediately on logout/login
   const [token, setToken] = useState(() => {
     try { return localStorage.getItem('jwt'); } catch { return null; }
@@ -744,35 +747,57 @@ function Main() {
             >
               Theme
             </button>
+            <Link
+              to="/memory"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="Memory MCP view"
+            >
+              Memory
+            </Link>
           </div>
         </div>
-      {/* Tableau bazaar réutilisable (lazy) */}
-      <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
-        <BazaarTable
-          bazaarRows={bazaarRows}
-          watchedItems={watchedItems}
-          priceThresholds={priceThresholds}
-          blinkingItems={blinkingItems}
-          onThresholdChange={(itemId, value) => {
-            setPriceThresholds(prev => {
-              const updated = { ...prev, [itemId]: value };
-              try { localStorage.setItem('priceThresholds', JSON.stringify(updated)); } catch(_) {}
-              return updated;
-            });
-          }}
-          onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch(_) {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
-          sendWs={sendWithPulse}
-        />
-      </Suspense>
+      {!isMemoryPage && (
+        <>
+          {/* Tableau bazaar réutilisable (lazy) */}
+          <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
+            <BazaarTable
+              bazaarRows={bazaarRows}
+              watchedItems={watchedItems}
+              priceThresholds={priceThresholds}
+              blinkingItems={blinkingItems}
+              onThresholdChange={(itemId, value) => {
+                setPriceThresholds(prev => {
+                  const updated = { ...prev, [itemId]: value };
+                  try { localStorage.setItem('priceThresholds', JSON.stringify(updated)); } catch(_) {}
+                  return updated;
+                });
+              }}
+              onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch(_) {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
+              sendWs={sendWithPulse}
+            />
+          </Suspense>
+        </>
+      )}
     <Routes>
-  <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
-  <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
+      <Route
+        path="/memory"
+        element={(
+          <Suspense fallback={<div style={{ padding: 20 }}>Chargement mémoire…</div>}>
+            <MemoryGraphExplorer darkMode={darkMode} />
+          </Suspense>
+        )}
+      />
+      <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
+      <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
     </Routes>
-  {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
-  <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />
-  {/* Barre d'outils et modals */}
+  {!isMemoryPage && (
+    <>
+      {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
+      <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />
+      {/* Barre d'outils et modals */}
 
-  <div className="row mb-4 align-items-start">
+      <div className="row mb-4 align-items-start">
         <div className="col-auto d-flex align-items-end" style={{gap:6}}>
           <div className="d-flex flex-column" style={{width:130}}>
             <label className="form-label mb-1" style={{fontSize:12}}>From</label>
@@ -906,7 +931,9 @@ function Main() {
             </div>
           )}
         </div>
-  </div>
+      </div>
+    </>
+  )}
   {/* Modal for Autocomplete */}
       {showAutocomplete && (
         <div

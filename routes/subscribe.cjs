@@ -14,28 +14,15 @@ module.exports = async function (fastify, isTest) {
   // Reuse existing model if already compiled (Hot reload safe)
   const User = mongoose.models.User || mongoose.model('User', userSchema);
 
-  fastify.post('/subscribe', async (req, reply) => {
-    const { username, passkey, TornAPIKey, id } = req.body || {};
-    // --- Rate limiting Redis (3 attempts / 60s / IP) ---
-    // Clé: rl:sub:<ip>  - incrément atomique + expiry.
-    // En cas d'erreur Redis on autorise (fail-open) mais on log un warn.
-    const ip = (req.ip || req.socket?.remoteAddress || 'unknown').replace(/[:]/g,'_');
-    const key = `rl:sub:${ip}`;
-    let current;
-    try {
-      current = await fastify.redis.incr(key);
-      if (current === 1) {
-        await fastify.redis.expire(key, 60);
+  fastify.post('/subscribe', {
+    config: {
+      rateLimit: {
+        max: 3,
+        timeWindow: '1 minute'
       }
-    } catch (e) {
-      try { fastify.log.warn({ msg: 'rate-limit redis error', err: e.message }); } catch {}
-      current = 1;
     }
-    if (current > 3) {
-      reply.code(429);
-      return reply.send({ success:false, message:'Too many subscribe attempts. Retry later.' });
-    }
-    // --- End rate limiting ---
+  }, async (req, reply) => {
+    const { username, passkey, TornAPIKey, id } = req.body || {};
     if (!username || !passkey || !TornAPIKey || typeof id !== 'number') {
       return reply.send({ success: false, message: 'Missing required fields (username, passkey, TornAPIKey, id)' });
     }

@@ -3,7 +3,15 @@ const socketEvents = require('../socketEvents.cjs');
 const dailyPriceAverager = require('../dailyPriceAverager.cjs');
 module.exports = (fastify, isTest) => {
     fastify.register(async function (fastify) {
-    fastify.get('/ws', { websocket: true }, (socket , req /*, reply */ ) => {
+    fastify.get('/ws', {
+        websocket: true,
+        config: {
+            rateLimit: {
+                max: 60,
+                timeWindow: '1 minute'
+            }
+        }
+    }, (socket , req /*, reply */ ) => {
             const connId = Date.now().toString(36)+Math.random().toString(36).slice(2,7);
             const PING_INTERVAL = parseInt(process.env.WS_PING_INTERVAL_MS || '30000');
             const PONG_TIMEOUT = parseInt(process.env.WS_PONG_TIMEOUT_MS || (PING_INTERVAL * 2).toString());

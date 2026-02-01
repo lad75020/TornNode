@@ -6,6 +6,7 @@
     "@fastify/error": "^4.1.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/mongodb": "^9.0.2",
+    "@fastify/rate-limit": "^10.3.0",
     "@fastify/redis": "^7.0.2",
     "@fastify/schedule": "^6.0.0",
     "@fastify/session": "^11.1.0",

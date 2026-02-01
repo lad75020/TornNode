@@ -11,7 +11,14 @@ module.exports = async function (fastify, isTest) {
     });
 
     const User = mongoose.model('User', userSchema);
-    fastify.post('/authenticate',  async (req, reply) => {
+    fastify.post('/authenticate', {
+        config: {
+            rateLimit: {
+                max: 10,
+                timeWindow: '1 minute'
+            }
+        }
+    }, async (req, reply) => {
         const { username, passkey } = req.body;
         
         const bcrypt = require('bcrypt');

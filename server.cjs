@@ -74,9 +74,9 @@ socketEvents.on('newSocket', async (socket, req) => {
         setInterval(() => wsStats(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 12*60*60*1000);
         setInterval(() => wsInsertNetworth({ session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify, socket), 24*60*60*1000);
     });
-    setInterval(() => wsCompanyStock(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 6*60*60*1000);
-    setInterval(() => wsCompanyProfile(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 6*60*60*1000);
-    setInterval(() => wsCompanyDetails(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 6*60*60*1000); 
+    setInterval(() => wsCompanyStock(socket, req, fastify), 6*60*60*1000);
+    setInterval(() => wsCompanyProfile(socket, req, fastify), 6*60*60*1000);
+    setInterval(() => wsCompanyDetails(socket, req, fastify), 6*60*60*1000); 
     fastify.log.info(`Warmup completed, cached ${users.length} users`);
 });
 
@@ -94,6 +94,7 @@ const fastifyFavicon = require('fastify-favicon');
 const bodyParser = require('@fastify/formbody');
 const fastifyCompress = require('@fastify/compress');
 const fastifyWebsocket = require('@fastify/websocket');
+const fastifyRateLimit = require('@fastify/rate-limit');
 const dailyPriceAverager = require('./dailyPriceAverager.cjs');
 const fastifyRedis = require('@fastify/redis');
 
@@ -103,6 +104,9 @@ fastify.register(fastifyCors, {
 });
 fastify.register(fastifyCompress);
 fastify.register(bodyParser);
+fastify.register(fastifyRateLimit, {
+    global: false
+});
 // Cookies & session AVANT la protection et les fichiers statiques pour que req.session soit disponible
 fastify.register(fastifyCookie);
 

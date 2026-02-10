@@ -1,15 +1,23 @@
 module.exports = async function (socket, req, fastify) { 
    try {
+    const { TornAPI } = require('torn-client');
+    const apiKey = req && req.session ? req.session.TornAPIKey : null;
+    if (!apiKey) {
+        try { socket.send(JSON.stringify({ type:'importProgress', kind:'attacks', error: 'Invalid session: missing TornAPIKey' })); } catch {}
+        return;
+    }
+    const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
+    const tornClient = new TornAPI({
+        apiKeys: [apiKey],
+        ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+    });
+
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
     await ensureUserDbStructure(fastify, req.session.userID, null);
     const database = getUserDb(fastify, req);
         const INTERVAL = 86400;
     const attacksCollection = database.collection('attacks');
-
-        const headers = {
-            'Authorization': `ApiKey ${req.session.TornAPIKey}`
-        };
 
     let doc = await attacksCollection.findOne({}, { sort: { ended: -1 }, limit: 1 });
     const nowSec = Math.floor(Date.now() / 1000);
@@ -18,13 +26,30 @@ module.exports = async function (socket, req, fastify) {
     const endTs = nowSec + INTERVAL; // même logique initiale
     let countInserted = 0;
     let lastProgressSent = 0;
-    for (let t = startTs; t <= endTs; t += INTERVAL) {
+        for (let t = startTs; t <= endTs; t += INTERVAL) {
             if (socket.__stopImport && socket.__stopImport.attacks) {
                 try { socket.send(JSON.stringify({ type:'importStopped', kind:'attacks' })); } catch {}
                 return;
             }
-            const response = await fetch(`${process.env.TORN_API_URL}user/attacks?from=${t}&to=${t + INTERVAL}`, { headers });
-            const jsonLogs = await response.json();
+            let jsonLogs;
+            try {
+                jsonLogs = await tornClient.user.attacks({ from: t, to: t + INTERVAL });
+            } catch (e) {
+                if (e && typeof e.code === 'number') {
+                    fastify && fastify.log && fastify.log.warn(`[wsTornAttacks] API error code=${e.code} msg=${e.message}`);
+                    await new Promise(r => setTimeout(r, 10000));
+                    t -= INTERVAL;
+                    continue;
+                }
+                fastify && fastify.log && fastify.log.warn(`[wsTornAttacks] request fail segment from=${t} to=${t + INTERVAL} ${e.message}`);
+                continue;
+            }
+            if (jsonLogs && jsonLogs.error) {
+                fastify && fastify.log && fastify.log.warn(`[wsTornAttacks] API error code=${jsonLogs.error.code} msg=${jsonLogs.error.error}`);
+                await new Promise(r => setTimeout(r, 10000));
+                t -= INTERVAL;
+                continue;
+            }
 
             if (jsonLogs.attacks) {
                 for (const [property, value] of Object.entries(jsonLogs.attacks)) {

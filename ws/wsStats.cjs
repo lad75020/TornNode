@@ -5,9 +5,16 @@ module.exports = async function wsStats(socket, req, fastify) {
         } catch(_) {}
     };
     try {
-        if (!req?.session?.TornAPIKey) {
+        const { TornAPI } = require('torn-client');
+        const apiKey = req && req.session ? req.session.TornAPIKey : null;
+        if (!apiKey) {
             return makeSend({ type:'statsInsert', ok:false, inserted:false, error:'Invalid session', time:Date.now() });
         }
+        const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
+        const tornClient = new TornAPI({
+            apiKeys: [apiKey],
+            ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+        });
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
     await ensureUserDbStructure(fastify, req.session.userID, fastify?.log || null);
@@ -30,13 +37,7 @@ module.exports = async function wsStats(socket, req, fastify) {
         }
 
         // Appel API Torn (stats complètes)
-        const url = `${process.env.TORN_API_URL}user/personalstats?cat=all`;
-        const headers = { 'Authorization': `ApiKey ${req.session.TornAPIKey}` };
-        const response = await fetch(url, { headers });
-        if (!response.ok) {
-            return makeSend({ type:'statsInsert', ok:false, inserted:false, error:`HTTP ${response.status}`, time:Date.now() });
-        }
-        const data = await response.json();
+        const data = await tornClient.user.personalstats({ cat: 'all' });
         const doc = { ...data, date: new Date() };
         await collection.insertOne(doc);
         return makeSend({ type:'statsInsert', ok:true, inserted:true, date: doc.date, message:'Stats inserted successfully', time:Date.now() });

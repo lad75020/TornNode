@@ -1,12 +1,17 @@
 'use strict';
 require('dotenv').config();
+const { TornAPI } = require('torn-client');
 
 const fastifyPlugin = require('fastify-plugin');
-const API_BASE = process.env.TORN_API_URL;
 const REFRESH_MS = Number(process.env.REFRESH_MS || 30000);
 const SAFE_RPM = Math.min(Number(process.env.SAFE_RPM || 55), 59);
 const API_KEY = process.env.TORN_API_KEY;
 if (!API_KEY) throw new Error('Missing TORN_API_KEY in .env');
+const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
+const tornClient = new TornAPI({
+  apiKeys: [API_KEY],
+  ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+});
 
 const dynamicWatchSet = new Set();
 
@@ -48,17 +53,12 @@ function processQueue() {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function getJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return res.json();
-}
-
 async function getBazaarListings(fastify, itemId) {
-  const url = `${API_BASE}/market/${itemId}?selections=itemmarket&key=${API_KEY}`;
-  const data = await getJson(url);
-  if (data.error) throw new Error(`Market error: [${data.error.code}] ${data.error.error}`);
-  const listings = (data.itemmarket && data.itemmarket.listings) || [];
+  const data = await tornClient.market.withId(itemId).itemmarket({ offset: 0 });
+  const listingsRaw = data && data.itemmarket ? data.itemmarket.listings : null;
+  const listings = Array.isArray(listingsRaw)
+    ? listingsRaw
+    : (listingsRaw && typeof listingsRaw === 'object' ? [listingsRaw] : []);
   const mapped = listings.map(l => ({
     price: Number(l.price),
     quantity: Number(l.amount)

@@ -22,11 +22,16 @@ module.exports = async function wsUpdatePrice(socket, req, fastify, parsed, redi
       if (!apiKey) {
         throw new Error('Missing Torn API key');
       }
-      const url = `${process.env.TORN_API_URL}market/${idInt}/itemmarket?offset=0`;
-      const headers = { 'Authorization': `ApiKey ${apiKey}` };
-      const apiResp = await fetch(url, { headers });
-      const data = await apiResp.json();
-      price = data?.itemmarket?.listings?.[0]?.price;
+      const { TornAPI } = require('torn-client');
+      const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
+      const tornClient = new TornAPI({
+        apiKeys: [apiKey],
+        ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+      });
+      const data = await tornClient.market.withId(idInt).itemmarket({ offset: 0 });
+      const listings = data && data.itemmarket ? data.itemmarket.listings : null;
+      if (Array.isArray(listings)) price = listings[0] && typeof listings[0] === 'object' ? listings[0].price : undefined;
+      else if (listings && typeof listings === 'object') price = listings.price;
     }
     if (typeof price === 'number') {
       await itemsCollection.updateOne({ id: idInt }, { $set: { price } }, { upsert: false });

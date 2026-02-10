@@ -9,6 +9,16 @@ module.exports = async function (req, fastify, socket) {
         } catch (_) {}
     };
     try {
+        const { TornAPI } = require('torn-client');
+        const apiKey = req && req.session ? req.session.TornAPIKey : null;
+        if (!apiKey) {
+            return makeSend({ type:'networthInsert', ok:false, inserted:false, error:'Invalid session', time:Date.now() });
+        }
+        const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
+        const tornClient = new TornAPI({
+            apiKeys: [apiKey],
+            ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+        });
         // DB par utilisateur
         const getUserDb = require('../utils/getUserDb.cjs');
         let database;
@@ -20,9 +30,6 @@ module.exports = async function (req, fastify, socket) {
         catch(e){
             return makeSend({ type:'networthInsert', ok:false, inserted:false, error:e.message, time:Date.now() });
         }
-        const headers = {
-            'Authorization': `ApiKey ${req.session.TornAPIKey}`
-        };
 
         const networthCollection = database.collection('Networth');
         const twelveHoursAgo = new Date();
@@ -41,17 +48,7 @@ module.exports = async function (req, fastify, socket) {
             });
         }
 
-        const response = await fetch(`${process.env.TORN_API_URL}user/money`, { headers });
-        if (!response.ok) {
-            return makeSend({
-                type: 'networthInsert',
-                ok: false,
-                inserted: false,
-                error: `HTTP ${response.status}`,
-                time: Date.now()
-            });
-        }
-        const networth = await response.json();
+        const networth = await tornClient.user.money();
         
         networth.date = new Date();
         await networthCollection.insertOne(networth);

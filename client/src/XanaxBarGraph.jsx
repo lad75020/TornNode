@@ -5,12 +5,23 @@ import { getLogsByLogId } from './dbLayer.js';
 import { Bar } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
 
+function getLastNDaysRange(days) {
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (Math.max(1, Number(days) || 1) - 1));
+  return {
+    from: start.toISOString().slice(0, 10),
+    to: end.toISOString().slice(0, 10),
+  };
+}
+
 export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [data, setData] = useState({ labels: [], counts2290: [], counts2291: [], cumulative2290: [], average2290: 0 });
   const [dailyBase, setDailyBase] = useState({ labels: [], counts2290: [], counts2291: [] });
   const [granularity, setGranularity] = useState('daily');
   const [showChart, setShowChart] = useState(true);
   const [totalXanax, setTotalXanax] = useState(null);
+  const [zoom30Days, setZoom30Days] = useState(false);
   const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
@@ -41,16 +52,19 @@ export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400
   function recomputeAggregates(gran, base) {
     const src = base || dailyBase;
     if (!src.labels.length) return;
+    const last30 = getLastNDaysRange(30);
+    const effectiveFrom = zoom30Days ? last30.from : dateFrom;
+    const effectiveTo = zoom30Days ? last30.to : dateTo;
     // Filtrage range sur base quotidienne avant agrégation
     let ranged = src;
-    if (dateFrom || dateTo) {
+    if (effectiveFrom || effectiveTo) {
       const labels = [];
       const c2290 = [];
       const c2291 = [];
       for (let i=0;i<src.labels.length;i++) {
         const d = src.labels[i];
-        if (dateFrom && d < dateFrom) continue;
-        if (dateTo && d > dateTo) continue;
+        if (effectiveFrom && d < effectiveFrom) continue;
+        if (effectiveTo && d > effectiveTo) continue;
         labels.push(d);
         c2290.push(src.counts2290[i]);
         c2291.push(src.counts2291[i]);
@@ -104,7 +118,10 @@ export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400
     setData({ labels, counts2290: g2290, counts2291: g2291, cumulative2290, average2290: avg });
   }
 
-  useEffect(() => { recomputeAggregates(granularity); }, [granularity, dailyBase]);
+  useEffect(() => { recomputeAggregates(granularity); }, [granularity, dailyBase, dateFrom, dateTo, zoom30Days]);
+
+  const timeframeTotalLogs = data.counts2290.reduce((acc, v) => acc + Number(v || 0), 0)
+    + data.counts2291.reduce((acc, v) => acc + Number(v || 0), 0);
 
   return (
     <div className="my-4">
@@ -115,6 +132,23 @@ export default function XanaxBarGraph({ logsUpdated, darkMode, chartHeight = 400
       >
         Xanax taken ({granularity}) and Overdoses
       </h5>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className={`btn btn-sm ${zoom30Days ? 'btn-primary' : 'btn-outline-primary'}`}
+          onClick={() => setZoom30Days(prev => !prev)}
+        >
+          30 days
+        </button>
+        <InlineStat
+          id="xanax-graph-timeframe-total"
+          label="Total:"
+          value={timeframeTotalLogs}
+          containerStyle={{ margin: 0, maxWidth: 340 }}
+          labelStyle={{ fontSize: 12 }}
+          inputStyle={{ fontSize: 13, fontWeight: 600, maxWidth: 120, padding: '2px 8px', height: 30 }}
+        />
+      </div>
       {showChart && (
         <>
           <div style={{ position:'relative', height: chartHeight }}>

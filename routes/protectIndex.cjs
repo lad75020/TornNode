@@ -43,7 +43,7 @@ module.exports = async function (fastify) {
   });
 
   // SPA routes (chart) protégées pareil
-  const spaPaths = ['/chart', '/chart/*', '/memory', '/memory/*'];
+  const spaPaths = ['/chart', '/chart/*', '/memory', '/memory/*', '/ws-torn-test', '/ws-torn-test/*'];
   for (const p of spaPaths) {
     fastify.get(p, {
       preHandler: (req, reply, done) => {

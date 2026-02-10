@@ -61,6 +61,7 @@ const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
 const MemoryGraphExplorer = lazy(() => import('./MemoryGraphExplorer.jsx'));
+const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -228,6 +229,7 @@ const chartComponents = [
 function Main() {
   const location = useLocation();
   const isMemoryPage = location.pathname.startsWith('/memory');
+  const isWsTornTestPage = location.pathname.startsWith('/ws-torn-test');
   // Track auth token in state so UI reacts immediately on logout/login
   const [token, setToken] = useState(() => {
     try { return localStorage.getItem('jwt'); } catch { return null; }
@@ -755,9 +757,17 @@ function Main() {
             >
               Memory
             </Link>
+            <Link
+              to="/ws-torn-test"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="wsTorn dry-run tester"
+            >
+              wsTorn Test
+            </Link>
           </div>
         </div>
-      {!isMemoryPage && (
+      {!isMemoryPage && !isWsTornTestPage && (
         <>
           {/* Tableau bazaar réutilisable (lazy) */}
           <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
@@ -788,10 +798,23 @@ function Main() {
           </Suspense>
         )}
       />
+      <Route
+        path="/ws-torn-test"
+        element={(
+          <Suspense fallback={<div style={{ padding: 20 }}>Loading wsTorn test...</div>}>
+            <WsTornTestPage
+              wsStatus={wsMain.status}
+              wsMessages={wsMain.messages}
+              sendWs={sendWithPulse}
+              darkMode={darkMode}
+            />
+          </Suspense>
+        )}
+      />
       <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
       <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
     </Routes>
-  {!isMemoryPage && (
+  {!isMemoryPage && !isWsTornTestPage && (
     <>
       {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
       <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />

@@ -268,6 +268,32 @@ module.exports = (fastify, isTest) => {
                                         } catch (_) {}
                                         return;
                                       }
+                                    } else if (parsed.type === "wsStatsTest") {
+                                      try {
+                                        return require("../ws/wsStats.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                          {
+                                            dryRun: true,
+                                            cat: parsed.cat,
+                                            requestId: parsed.requestId,
+                                          },
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(e);
+                                        try {
+                                          socket.send(
+                                            JSON.stringify({
+                                              type: "wsStatsTestResult",
+                                              ok: false,
+                                              requestId: parsed.requestId,
+                                              error: e.message,
+                                            }),
+                                          );
+                                        } catch (_) {}
+                                        return;
+                                      }
                                     } else if (parsed.type === "updatePrice") {
                                       try {
                                         return require("../ws/wsUpdatePrice.cjs")(

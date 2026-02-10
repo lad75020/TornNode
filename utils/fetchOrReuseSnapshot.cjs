@@ -12,6 +12,51 @@
 //       rawDoc?: bool (si besoin retourner doc complet)
 //    }
 // Retourne: { reused, inserted, stale, timestamp, data, error? }
+const { TornAPI } = require('torn-client');
+
+function hasCompanySelection(url, expectedSelection) {
+  try {
+    const parsed = new URL(url);
+    const selections = String(parsed.searchParams.get('selections') || '').toLowerCase();
+    return parsed.pathname.startsWith('/company/') && selections.split(',').includes(String(expectedSelection).toLowerCase());
+  } catch (_) {
+    return false;
+  }
+}
+
+function isCompanyDetailsUrl(url) {
+  return hasCompanySelection(url, 'detailed');
+}
+
+function isCompanyProfileUrl(url) {
+  return hasCompanySelection(url, 'profile');
+}
+
+function isCompanyStockUrl(url) {
+  return hasCompanySelection(url, 'stock');
+}
+
+async function fetchCompanySnapshotWithTornClient(url) {
+  const parsed = new URL(url);
+  const apiKey = parsed.searchParams.get('key');
+  if (!apiKey) throw new Error('missing_api_key_in_url');
+
+  const params = {};
+  for (const [k, v] of parsed.searchParams.entries()) {
+    if (k === 'key' || k === 'comment') continue;
+    params[k] = v;
+  }
+
+  const baseApiUrl = `${parsed.protocol}//${parsed.host}`;
+  const comment = parsed.searchParams.get('comment');
+  const tornClient = new TornAPI({
+    apiKeys: [apiKey],
+    apiUrl: baseApiUrl,
+    ...(comment ? { comment } : {})
+  });
+
+  return tornClient.requestHandler.makeRequest(parsed.pathname, params);
+}
 
 module.exports = async function fetchOrReuseSnapshot(fastify, options) {
   const {
@@ -45,15 +90,20 @@ module.exports = async function fetchOrReuseSnapshot(fastify, options) {
     // Fetch API
     let json;
     try {
-      const res = await fetch(url, { method:'GET', redirect:'follow' });
-      if (debug) { try { fastify.log.info({ status: res.status }, '[fetchOrReuseSnapshot] fetch status'); } catch {} }
-      if (!res.ok) {
-        let text = '';
-        try { text = await res.text(); } catch {}
-        const msg = `HTTP ${res.status}${text ? ' body:'+text.slice(0,180) : ''}`;
-        throw new Error(msg);
+      if (isCompanyDetailsUrl(url) || isCompanyProfileUrl(url) || isCompanyStockUrl(url)) {
+        json = await fetchCompanySnapshotWithTornClient(url);
+        if (debug) { try { fastify.log.info('[fetchOrReuseSnapshot] company snapshot via torn-client'); } catch {} }
+      } else {
+        const res = await fetch(url, { method:'GET', redirect:'follow' });
+        if (debug) { try { fastify.log.info({ status: res.status }, '[fetchOrReuseSnapshot] fetch status'); } catch {} }
+        if (!res.ok) {
+          let text = '';
+          try { text = await res.text(); } catch {}
+          const msg = `HTTP ${res.status}${text ? ' body:'+text.slice(0,180) : ''}`;
+          throw new Error(msg);
+        }
+        json = await res.json();
       }
-      json = await res.json();
       if (debug) {
         try {
           const keys = json && typeof json === 'object' ? Object.keys(json) : [];

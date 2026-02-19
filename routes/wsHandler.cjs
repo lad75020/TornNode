@@ -209,6 +209,14 @@ module.exports = (fastify, isTest) => {
                         }
                         return;
                     }
+                    case 'pointPrice': {
+                        fastify.log.info({ connId }, '[ws] pointPrice command');
+                        try { require('../ws/wsPointPrice.cjs')(socket, req, fastify); } catch(e){
+                            fastify.log.error(`[ws] pointPrice handler error: ${e.message}`);
+                            try { socket.send(JSON.stringify({ type:'pointPrice', ok:false, error:e.message })); } catch(_) {}
+                        }
+                        return;
+                    }
                     default: {
                         // Permettre JSON messages futurs
                         if (message.startsWith('{') || message.startsWith('[')) {
@@ -528,6 +536,32 @@ module.exports = (fastify, isTest) => {
                                           socket.send(
                                             JSON.stringify({
                                               type: "dailyPriceAveragesAll",
+                                              ok: false,
+                                              error: e.message,
+                                            }),
+                                          );
+                                        } catch (_) {}
+                                      }
+                                      return;
+                                    } else if (parsed.type === "pointPrice") {
+                                      fastify.log.info(
+                                        { connId },
+                                        "[ws] pointPrice command (json)",
+                                      );
+                                      try {
+                                        return require("../ws/wsPointPrice.cjs")(
+                                          socket,
+                                          req,
+                                          fastify,
+                                        );
+                                      } catch (e) {
+                                        fastify.log.error(
+                                          `[ws] pointPrice handler error: ${e.message}`,
+                                        );
+                                        try {
+                                          socket.send(
+                                            JSON.stringify({
+                                              type: "pointPrice",
                                               ok: false,
                                               error: e.message,
                                             }),

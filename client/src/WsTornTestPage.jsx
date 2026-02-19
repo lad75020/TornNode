@@ -25,8 +25,12 @@ export default function WsTornTestPage({ wsStatus, wsMessages = [], sendWs, dark
   const [companyResult, setCompanyResult] = useState(null);
   const [companyError, setCompanyError] = useState('');
   const [companyForceDetails, setCompanyForceDetails] = useState(false);
+  const [pointPending, setPointPending] = useState(false);
+  const [pointResult, setPointResult] = useState(null);
+  const [pointError, setPointError] = useState('');
   const companyCollectorRef = useRef(null);
   const lastProcessedIndexRef = useRef(0);
+  const lastPointProcessedIndexRef = useRef(0);
 
   useEffect(() => {
     if (!requestId && !statsRequestId && !companyRequestId) {
@@ -92,12 +96,38 @@ export default function WsTornTestPage({ wsStatus, wsMessages = [], sendWs, dark
   }, [wsMessages, requestId, statsRequestId, companyRequestId]);
 
   useEffect(() => {
+    if (lastPointProcessedIndexRef.current === wsMessages.length) return;
+
+    for (let i = lastPointProcessedIndexRef.current; i < wsMessages.length; i += 1) {
+      const raw = wsMessages[i];
+      if (!raw || raw[0] !== '{') continue;
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { continue; }
+      if (!parsed || typeof parsed !== 'object') continue;
+      if (parsed.type !== 'pointPrice') continue;
+
+      setPointPending(false);
+      setPointResult(parsed);
+      if (parsed.ok === false) setPointError(parsed.error || 'Request failed');
+      else setPointError('');
+    }
+
+    lastPointProcessedIndexRef.current = wsMessages.length;
+  }, [wsMessages]);
+
+  useEffect(() => {
     if (wsStatus !== 'open') {
       setPending(false);
       setStatsPending(false);
       setCompanyPending(false);
+      setPointPending(false);
     }
   }, [wsStatus]);
+
+  const formatMoney = (value) => {
+    if (!Number.isFinite(Number(value))) return '-';
+    return `$${Math.round(Number(value)).toLocaleString()}`;
+  };
 
   const handleCall = (event) => {
     event.preventDefault();
@@ -197,6 +227,24 @@ export default function WsTornTestPage({ wsStatus, wsMessages = [], sendWs, dark
       setCompanyPending(false);
       companyCollectorRef.current = null;
       setCompanyError(e && e.message ? e.message : 'Failed to send request.');
+    }
+  };
+
+  const handlePointPriceRefresh = () => {
+    if (wsStatus !== 'open') {
+      setPointError('WebSocket is not connected.');
+      return;
+    }
+
+    setPointPending(true);
+    setPointError('');
+    lastPointProcessedIndexRef.current = wsMessages.length;
+
+    try {
+      sendWs(JSON.stringify({ type: 'pointPrice' }));
+    } catch (e) {
+      setPointPending(false);
+      setPointError(e && e.message ? e.message : 'Failed to send request.');
     }
   };
 
@@ -387,6 +435,46 @@ export default function WsTornTestPage({ wsStatus, wsMessages = [], sendWs, dark
         }}
       >
         <JsonPreview value={companyResponseValue} className="json-preview" style={{ fontSize: 13 }} />
+      </div>
+
+      <hr className="my-4" />
+
+      <h5 className="mb-3">Point Price vs Plushies (10 points)</h5>
+      <div className="row g-2 align-items-end mb-3">
+        <div className="col-auto d-flex" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={pointPending || wsStatus !== 'open'}
+            onClick={handlePointPriceRefresh}
+          >
+            {pointPending ? 'Loading...' : 'Refresh Point Price'}
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-2" style={{ fontSize: 13 }}>
+        <strong>WS:</strong> {wsStatus}
+        {pointResult && pointResult.time ? (
+          <span> | <strong>Updated:</strong> {new Date(pointResult.time).toLocaleString()}</span>
+        ) : null}
+      </div>
+
+      {pointError ? (
+        <div className="alert alert-danger py-2">{pointError}</div>
+      ) : null}
+
+      <div
+        style={{
+          border: `1px solid ${darkMode ? '#444' : '#ddd'}`,
+          borderRadius: 6,
+          padding: 10,
+          background: darkMode ? '#121212' : '#fff',
+          fontSize: 14,
+        }}
+      >
+        <div><strong>Points market (10 points):</strong> {formatMoney(pointResult && pointResult.pointsMarket10PointsPrice)}</div>
+        <div><strong>Plushies total (10 points):</strong> {formatMoney(pointResult && pointResult.plushies10PointsPrice)}</div>
       </div>
     </div>
   );

@@ -226,7 +226,7 @@ async function pushToMcp(index) {
     console.log('[memory] legacy push disabled, skipping internal uploader');
     return;
   }
-  const endpoint = process.env.MEMORY_MCP_ENDPOINT;
+  const endpoint = "http://localhost:17990";
   const namespace = process.env.MEMORY_MCP_NAMESPACE || 'tornnode';
   if (!endpoint || process.env.DRY_RUN === 'true') {
     console.log('[memory] DRY RUN or no endpoint, skip push');

@@ -2,7 +2,8 @@
 
 function buildMcpUrl(endpoint) {
   const base = String(endpoint || '').replace(/\/$/, '');
-  return base.endsWith('/mcp') ? base : `${base}/mcp`;
+  if (/\/(mcp|sse)(\?|$)/.test(base)) return base;
+  return `${base}/mcp`;
 }
 
 function parseSse(body) {
@@ -39,8 +40,31 @@ function createMcpClient({ endpoint, apiKey, clientInfo } = {}) {
   if (!endpoint) throw new Error('MCP endpoint missing');
   const url = buildMcpUrl(endpoint);
   let sessionId = null;
+  let sseReader = null;
+  let sseBuffer = '';
+  let sseSessionUrl = null;
   const auth = apiKey ? `Bearer ${apiKey}` : null;
   const clientInfoFinal = clientInfo || { name: 'tornnode-mcp-client', version: '1.0.0' };
+  const isSseTransport = /\/sse(\?|$)/.test(url);
+
+  function withTimeout(promise, timeoutMs, label) {
+    if (!timeoutMs || timeoutMs <= 0) return promise;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  }
+
+  function resolveSessionUrl(baseUrl, maybeRelative) {
+    if (!maybeRelative) return baseUrl;
+    try {
+      return new URL(maybeRelative, baseUrl).toString();
+    } catch {
+      return baseUrl;
+    }
+  }
 
   async function send(payload) {
     const headers = {
@@ -64,10 +88,91 @@ function createMcpClient({ endpoint, apiKey, clientInfo } = {}) {
     return parseSse(text);
   }
 
+  async function sseReadNextEvent(timeoutMs) {
+    if (!sseReader) throw new Error('SSE reader not initialized');
+
+    while (!sseBuffer.includes('\n\n')) {
+      const readResult = await withTimeout(sseReader.read(), timeoutMs, 'sse.read');
+      if (!readResult || readResult.done) throw new Error('SSE stream closed');
+      sseBuffer += new TextDecoder().decode(readResult.value, { stream: true });
+    }
+
+    const splitAt = sseBuffer.indexOf('\n\n');
+    const block = sseBuffer.slice(0, splitAt);
+    sseBuffer = sseBuffer.slice(splitAt + 2);
+    const parsed = parseSse(block);
+    return parsed[0] || null;
+  }
+
+  async function sseEnsureSession() {
+    if (sseReader && sseSessionUrl) return;
+
+    const headers = { Accept: 'text/event-stream' };
+    if (auth) headers['Authorization'] = auth;
+
+    const res = await fetch(url, { method: 'GET', headers });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`[HTTP ${res.status}] ${txt}`);
+    }
+    if (!res.body) throw new Error('SSE body unavailable');
+
+    sseReader = res.body.getReader();
+    sseBuffer = '';
+
+    const evt = await sseReadNextEvent(15000);
+    if (!evt || evt.event !== 'endpoint') throw new Error('SSE endpoint event missing');
+
+    const endpointPath = typeof evt.data === 'string' ? evt.data : '';
+    sseSessionUrl = resolveSessionUrl(url, endpointPath);
+  }
+
+  async function sseSend(payload) {
+    await sseEnsureSession();
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
+    };
+    if (auth) headers['Authorization'] = auth;
+
+    const res = await fetch(sseSessionUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+    const txt = await res.text();
+    if (!res.ok) throw new Error(`[HTTP ${res.status}] ${txt}`);
+  }
+
+  async function sseWaitJsonRpc(id) {
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      const evt = await sseReadNextEvent(Math.max(1000, deadline - Date.now()));
+      if (!evt) continue;
+      if (evt.event !== 'message') continue;
+
+      let msg = evt.data;
+      if (typeof msg === 'string') {
+        try { msg = JSON.parse(msg); } catch { continue; }
+      }
+      if (!msg || typeof msg !== 'object') continue;
+      if (msg.id === id) return msg;
+    }
+    throw new Error(`[response] timeout for id ${id}`);
+  }
+
   async function call(method, params) {
     const id = `${method}-${Math.random().toString(16).slice(2, 10)}`;
-    const events = await send({ jsonrpc: '2.0', id, method, params });
-    const msg = findJsonRpcMessage(events, id);
+    let msg;
+
+    if (isSseTransport) {
+      await sseSend({ jsonrpc: '2.0', id, method, params });
+      msg = await sseWaitJsonRpc(id);
+    } else {
+      const events = await send({ jsonrpc: '2.0', id, method, params });
+      msg = findJsonRpcMessage(events, id);
+    }
+
     if (!msg) throw new Error(`[${method}] response missing`);
     if (msg.error) throw new Error(`[${method}] ${JSON.stringify(msg.error)}`);
     return msg.result;

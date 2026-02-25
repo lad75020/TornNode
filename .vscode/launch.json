@@ -19,7 +19,7 @@
                 "127.0.0.1",
                 "--test"
             ],
-            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v25.2.1/bin/node"
+            "runtimeExecutable": "/home/ubuntu/.nvm/versions/node/v25.7.0/bin/node"
         }
     ,
         
@@ -31,7 +31,7 @@
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}/fetchAllStatsAndInsert.js",
-            "runtimeExecutable": "/home/laurent/.nvm/versions/node/v25.2.1/bin/node"
+            "runtimeExecutable": "/home/ubuntu/.nvm/versions/node/v25.7.0/bin/node"
         }
     ]
 }

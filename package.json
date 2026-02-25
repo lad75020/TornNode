@@ -39,6 +39,7 @@
     "suncalc": "^1.9.0",
     "toad-scheduler": "^3.1.0",
     "torn-api-wrapper": "^0.4.21",
+    "torn-client": "^0.3.9",
     "url": "^0.11.4",
     "yargs": "^17.7.2"
   },

@@ -56,7 +56,7 @@ if (isTest) {
     redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 }
 
-// --- WebSocket session management & scheduled jobs per socket (stabilisé) ---
+// --- WebSocket session management ---
 const wsTorn = require('./ws/wsTorn.cjs');
 const wsTornAttacks = require('./ws/wsTornAttacks.cjs');
 const wsStats = require('./ws/wsStats.cjs');
@@ -66,22 +66,109 @@ const wsCompanyDetails = require('./ws/wsCompanyDetails.cjs');
 const wsCompanyProfile = require('./ws/wsCompanyProfile.cjs');
 
 socketEvents.on('newSocket', async (socket, req) => {
-    const usersCollection = (fastify.mongo?.db ? fastify.mongo.db('sessions') : fastify.mongo.client.db('sessions')).collection('users');
-    const users = await usersCollection.find({}, { projection: { id: 1, TornAPIKey:1 } }).toArray();
-    users.forEach(u => {
-        setInterval(() => wsTorn(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 15*60*1000);
-        setInterval(() => wsTornAttacks(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 15*60*1000);
-        setInterval(() => wsStats(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 12*60*60*1000);
-        setInterval(() => wsInsertNetworth({ session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify, socket), 24*60*60*1000);
-    });
-    setInterval(() => wsCompanyStock(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 6*60*60*1000);
-    setInterval(() => wsCompanyProfile(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 6*60*60*1000);
-    setInterval(() => wsCompanyDetails(socket, { session : {TornAPIKey : u.TornAPIKey, userID : u.id}}, fastify), 6*60*60*1000); 
-    fastify.log.info(`Warmup completed, cached ${users.length} users`);
+    setInterval(() => wsCompanyStock(socket, req, fastify), 6*60*60*1000);
+    setInterval(() => wsCompanyProfile(socket, req, fastify), 6*60*60*1000);
+    setInterval(() => wsCompanyDetails(socket, req, fastify), 6*60*60*1000); 
 });
 
+let userImportSchedulerStarted = false;
+const userImportSchedulerTimers = [];
+function startUserImportScheduler() {
+    if (userImportSchedulerStarted) return;
+    userImportSchedulerStarted = true;
+    const log = fastify.log;
+    const running = {
+        torn: false,
+        attacks: false,
+        stats: false,
+        networth: false
+    };
+    const silentSocket = {
+        send: () => {}
+    };
+    const buildReq = (user) => ({
+        session: {
+            TornAPIKey: user.TornAPIKey,
+            userID: user.id
+        }
+    });
+    async function fetchUsers() {
+        if (!fastify.mongo) {
+            return [];
+        }
+        const db = fastify.mongo?.db ? fastify.mongo.db('sessions') : fastify.mongo.client.db('sessions');
+        const usersCollection = db.collection('users');
+        return usersCollection.find({}, { projection: { id: 1, TornAPIKey: 1 } }).toArray();
+    }
+    async function runForAllUsers(taskName, taskFn) {
+        const users = await fetchUsers();
+        for (const user of users) {
+            try {
+                await taskFn(user);
+            } catch (e) {
+                try { log.warn(`[scheduler] ${taskName} user=${user.id} ${e.message}`); } catch {}
+            }
+        }
+        try { log.info(`[scheduler] ${taskName} ran for ${users.length} users`); } catch {}
+    }
+    function schedule(taskName, intervalMs, taskFn, runImmediately = false) {
+        if (runImmediately) {
+            setImmediate(async () => {
+                if (running[taskName]) return;
+                running[taskName] = true;
+                try {
+                    await taskFn();
+                } catch (e) {
+                    try { log.warn(`[scheduler] ${taskName} error ${e.message}`); } catch {}
+                } finally {
+                    running[taskName] = false;
+                }
+            });
+        }
+        const timer = setInterval(async () => {
+            if (running[taskName]) return;
+            running[taskName] = true;
+            try {
+                await taskFn();
+            } catch (e) {
+                try { log.warn(`[scheduler] ${taskName} error ${e.message}`); } catch {}
+            } finally {
+                running[taskName] = false;
+            }
+        }, intervalMs);
+        userImportSchedulerTimers.push(timer);
+    }
+
+    schedule('torn', 15*60*1000, async () => {
+        await runForAllUsers('wsTorn', async (user) => {
+            const req = buildReq(user);
+            await wsTorn(silentSocket, req, fastify);
+        });
+    }, true);
+    schedule('attacks', 15*60*1000, async () => {
+        await runForAllUsers('wsTornAttacks', async (user) => {
+            const req = buildReq(user);
+            await wsTornAttacks(silentSocket, req, fastify);
+        });
+    }, true);
+    schedule('stats', 12*60*60*1000, async () => {
+        await runForAllUsers('wsStats', async (user) => {
+            const req = buildReq(user);
+            await wsStats(silentSocket, req, fastify);
+        });
+    }, true);
+    schedule('networth', 24*60*60*1000, async () => {
+        await runForAllUsers('wsInsertNetworth', async (user) => {
+            const req = buildReq(user);
+            await wsInsertNetworth(req, fastify, silentSocket);
+        });
+    }, true);
+
+    try { log.info('[scheduler] user import warmup scheduled'); } catch {}
+}
+
 const fastify = require('fastify')({
-    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
+    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/ubuntu/.tonstatsdubbo/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
     trustProxy: true
 });
 
@@ -94,6 +181,8 @@ const fastifyFavicon = require('fastify-favicon');
 const bodyParser = require('@fastify/formbody');
 const fastifyCompress = require('@fastify/compress');
 const fastifyWebsocket = require('@fastify/websocket');
+const fastifyRateLimit = require('@fastify/rate-limit');
+const fastifyJwt = require('@fastify/jwt');
 const dailyPriceAverager = require('./dailyPriceAverager.cjs');
 const fastifyRedis = require('@fastify/redis');
 
@@ -103,6 +192,12 @@ fastify.register(fastifyCors, {
 });
 fastify.register(fastifyCompress);
 fastify.register(bodyParser);
+fastify.register(fastifyRateLimit, {
+    global: false
+});
+fastify.register(fastifyJwt, {
+    secret: process.env.JWT_SECRET
+});
 // Cookies & session AVANT la protection et les fichiers statiques pour que req.session soit disponible
 fastify.register(fastifyCookie);
 
@@ -140,6 +235,10 @@ fastify.register(fastifySession, {
 });
 fastify.addHook('onClose', async (_i, done) => {
     try { await redisClient.quit(); } catch {} finally { done(); }
+});
+fastify.addHook('onClose', async (_i, done) => {
+    userImportSchedulerTimers.forEach(clearInterval);
+    done();
 });
 // Les plugins dépendant de la session doivent être enregistrés après fastify-session
 fastify.after(() => {
@@ -207,33 +306,6 @@ fastify.register(require('@fastify/mongodb'), {
         require('./routes/wsHandler.cjs')(fastify, isTest);
    });    
     // Register routes après session pour garantir req.session
-    fastify.ready(async () => {
-        const fastifyVite = require('@fastify/vite');
-        try {
-            await fastify.register(fastifyVite, {
-                root: 'client',
-                dev: isTest,
-                spa: true
-            });
-            await fastify.vite.ready();
-        } catch (e) {
-            try { fastify.log.error('[vite] init failed '+e.message); } catch {}
-            process.exitCode = 1;
-            return;
-        }
-
-        // Root route: serve SPA if authenticated, otherwise serve static login page
-        fastify.get('/', (req, reply) => {
-            try {
-
-                    return reply.html();
-  
-            } catch (e) {
-                try { fastify.log && fastify.log.error('[root] handler error: ' + e.message); } catch {}
-                return reply.code(500).send('Internal Server Error');
-            }
-        });
-    });
     // Warmup amélioré (instrumentation + validation)
 
 // Encapsulation de l'initialisation asynchrone (évite top-level await en CJS)
@@ -258,7 +330,7 @@ fastify.register(require('@fastify/mongodb'), {
 
     if (!isTest) {
         try {
-            const pidDir = '/home/laurent/.tonstatsdubbo';
+            const pidDir = '/home/ubuntu/.tonstatsdubbo';
             if (!fs.existsSync(pidDir)) fs.mkdirSync(pidDir, { recursive: true });
             const pidFile = path.join(pidDir, 'tonstatsdubbo.pid');
             fs.writeFileSync(pidFile, process.pid.toString());
@@ -267,7 +339,18 @@ fastify.register(require('@fastify/mongodb'), {
         }
     }
 
-    fastify.listen({ port, host }, (err, address) => {
+    // Root route: serve static index
+    fastify.get('/', (req, reply) => {
+        try {
+            return reply.sendFile('index.html');
+        } catch (e) {
+            try { fastify.log && fastify.log.error('[root] handler error: ' + e.message); } catch {}
+            return reply.code(500).send('Internal Server Error');
+        }
+    });
+
+    const startServer = () => {
+        fastify.listen({ port, host }, (err, address) => {
         if (err) {
             try { fastify.log.error(err); } catch {}
             process.exitCode = 1;
@@ -277,9 +360,13 @@ fastify.register(require('@fastify/mongodb'), {
             const warmupItemsCache = require('./utils/warmupItemsCache.cjs');
             warmupItemsCache({ fastify, redisClient: fastify.redis })
                 .catch(e => fastify.log.error('[warmup] exception '+e.message));
+            startUserImportScheduler();
             try { fastify.log.info(`ROUTES:\n${fastify.printRoutes()}`); } catch {}
         });
         fastify.log.info(`Server running at ${address}`);
-    });
+        });
 
-    scheduleDailyAverageJob();
+        scheduleDailyAverageJob();
+    };
+
+    startServer();

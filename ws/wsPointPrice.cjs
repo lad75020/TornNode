@@ -41,8 +41,69 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
     });
   };
 
-  const getPlushies10PointsPriceFromRedis = async () => {
-    if (!redisClient) return { sum: null, count: 0, pricedCount: 0 };
+  const normalizeName = (v) => {
+    if (typeof v !== 'string') return '';
+    return v
+      .replace(/[’`]/g, "'")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  };
+
+  const SENET_SET_REQUIREMENTS = [
+    { name: 'Senet board', quantity: 1 },
+    { name: 'White Senet Pawn', quantity: 5 },
+    { name: 'Black Senet Pawn', quantity: 5 },
+  ].map((entry) => ({ ...entry, key: normalizeName(entry.name) }));
+
+  const QURAN_SET_REQUIREMENTS = [
+    { name: 'Quran Script : Ibn Masud', quantity: 1 },
+    { name: "Quran Script : Ubay Ibn Ka'b", quantity: 1 },
+    { name: 'Quran Script : Ali', quantity: 1 },
+  ].map((entry) => ({ ...entry, key: normalizeName(entry.name) }));
+
+  const FLOWER_SET_REQUIREMENTS = [
+    { name: 'Dahlia', quantity: 1 },
+    { name: 'Orchid', quantity: 1 },
+    { name: 'African Violet', quantity: 1 },
+    { name: 'Cherry Blossom', quantity: 1 },
+    { name: 'Peony', quantity: 1 },
+    { name: 'Ceibo Flower', quantity: 1 },
+    { name: 'Edelweiss', quantity: 1 },
+    { name: 'Crocus', quantity: 1 },
+    { name: 'Heather', quantity: 1 },
+    { name: 'Tribulus Omanense', quantity: 1 },
+    { name: 'Banana Orchid', quantity: 1 },
+  ].map((entry) => ({ ...entry, key: normalizeName(entry.name) }));
+
+  const COIN_SET_REQUIREMENTS = [
+    { name: 'Leopard Coin', quantity: 1 },
+    { name: ' Florin Coin', quantity: 1 },
+    { name: 'Gold Noble Coin', quantity: 1 },
+  ].map((entry) => ({ ...entry, key: normalizeName(entry.name) }));
+
+  const getSetTotal = (requirements, priceByName) => {
+    let total = 0;
+    for (const reqEntry of requirements) {
+      const price = priceByName.get(reqEntry.key);
+      if (!Number.isFinite(price)) return null;
+      total += price * reqEntry.quantity;
+    }
+    return total;
+  };
+
+  const getMuseumAndPlushiePricesFromRedis = async () => {
+    if (!redisClient) {
+      return {
+        sum: null,
+        count: 0,
+        pricedCount: 0,
+        senetSetPrice: null,
+        quranScriptSetPrice: null,
+        flowerSetPrice: null,
+        coinSetPrice: null,
+      };
+    }
 
     let cursor = '0';
     let sum = 0;
@@ -56,6 +117,19 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
     const isPlushieItem = (item) => {
       const type = asLower(item && item.type);
       return type === 'plushie';
+    };
+    const looksLikeItemNode = (node) => {
+      if (!node || typeof node !== 'object') return false;
+      if (typeof node.name !== 'string') return false;
+      const value = node.value && typeof node.value === 'object' ? node.value : null;
+      return (
+        node.id != null
+        || node.type != null
+        || node.price != null
+        || node.market_price != null
+        || node.average_price != null
+        || (value && value.market_price != null)
+      );
     };
 
     const pickItemPrice = (item) => {
@@ -76,6 +150,20 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
         if (Number.isFinite(n) && n === 0) return 0;
       }
       return null;
+    };
+
+    const collectItemNodes = (node, out) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach((entry) => collectItemNodes(entry, out));
+        return;
+      }
+      if (looksLikeItemNode(node)) {
+        out.push(node);
+      }
+      Object.values(node).forEach((value) => {
+        if (value && typeof value === 'object') collectItemNodes(value, out);
+      });
     };
 
     const collectPlushieItems = (node, out) => {
@@ -139,6 +227,8 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
     };
 
     const seenIds = new Set();
+    const seenNamedItemKeys = new Set();
+    const priceByName = new Map();
     do {
       let reply;
       try { reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 400 }); }
@@ -167,6 +257,26 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
 
         try {
           const parsed = JSON.parse(val);
+
+          const itemNodes = [];
+          collectItemNodes(parsed, itemNodes);
+          itemNodes.forEach((item) => {
+            const numericId = Number(item && item.id);
+            const normalizedName = normalizeName(item && item.name);
+            const dedupeKey = Number.isFinite(numericId)
+              ? `id:${numericId}`
+              : (normalizedName ? `name:${normalizedName}` : null);
+            if (dedupeKey && seenNamedItemKeys.has(dedupeKey)) return;
+            if (dedupeKey) seenNamedItemKeys.add(dedupeKey);
+
+            const price = pickItemPrice(item);
+            if (price === null) return;
+            if (!normalizedName) return;
+            if (!priceByName.has(normalizedName)) {
+              priceByName.set(normalizedName, price);
+            }
+          });
+
           const plushieItems = [];
           collectPlushieItems(parsed, plushieItems);
           plushieItems.forEach((item) => {
@@ -186,7 +296,20 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
       });
     } while (cursor !== '0');
 
-    return { sum, count, pricedCount };
+    const senetSetPrice = getSetTotal(SENET_SET_REQUIREMENTS, priceByName);
+    const quranScriptSetPrice = getSetTotal(QURAN_SET_REQUIREMENTS, priceByName);
+    const flowerSetPrice = getSetTotal(FLOWER_SET_REQUIREMENTS, priceByName);
+    const coinSetPrice = getSetTotal(COIN_SET_REQUIREMENTS, priceByName);
+
+    return {
+      sum,
+      count,
+      pricedCount,
+      senetSetPrice,
+      quranScriptSetPrice,
+      flowerSetPrice,
+      coinSetPrice,
+    };
   };
 
   try {
@@ -220,10 +343,18 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
 
     let plushies10PointsPrice = null;
     let plushieItemsCount = 0;
+    let senetSetPrice = null;
+    let quranScriptSetPrice = null;
+    let flowerSetPrice = null;
+    let coinSetPrice = null;
     try {
-      const plushieTotals = await getPlushies10PointsPriceFromRedis();
+      const plushieTotals = await getMuseumAndPlushiePricesFromRedis();
       plushies10PointsPrice = plushieTotals.sum;
       plushieItemsCount = plushieTotals.count;
+      senetSetPrice = plushieTotals.senetSetPrice;
+      quranScriptSetPrice = plushieTotals.quranScriptSetPrice;
+      flowerSetPrice = plushieTotals.flowerSetPrice;
+      coinSetPrice = plushieTotals.coinSetPrice;
       const plushiePricedItemsCount = plushieTotals.pricedCount;
       send({
         ...respBase,
@@ -231,6 +362,10 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
         minPrice,
         pointsMarket10PointsPrice: minPrice * 10,
         plushies10PointsPrice,
+        senetSetPrice,
+        quranScriptSetPrice,
+        flowerSetPrice,
+        coinSetPrice,
         plushieItemsCount,
         plushiePricedItemsCount,
         time: Date.now(),
@@ -238,7 +373,7 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
       return;
     } catch (redisErr) {
       if (fastify?.log) {
-        try { fastify.log.warn('[wsPointPrice] redis plushie sum failed: ' + redisErr.message); } catch (_) {}
+        try { fastify.log.warn('[wsPointPrice] redis item sum failed: ' + redisErr.message); } catch (_) {}
       }
     }
     send({
@@ -247,6 +382,10 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
       minPrice,
       pointsMarket10PointsPrice: minPrice * 10,
       plushies10PointsPrice,
+      senetSetPrice,
+      quranScriptSetPrice,
+      flowerSetPrice,
+      coinSetPrice,
       plushieItemsCount,
       plushiePricedItemsCount: 0,
       time: Date.now(),

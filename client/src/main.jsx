@@ -62,6 +62,7 @@ const Login = lazy(() => import('./Login.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
 const MemoryGraphExplorer = lazy(() => import('./MemoryGraphExplorer.jsx'));
 const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
+const Museum = lazy(() => import('./Museum.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -230,6 +231,7 @@ function Main() {
   const location = useLocation();
   const isMemoryPage = location.pathname.startsWith('/memory');
   const isWsTornTestPage = location.pathname.startsWith('/ws-torn-test');
+  const isMuseumPage = location.pathname.startsWith('/museum');
   // Track auth token in state so UI reacts immediately on logout/login
   const [token, setToken] = useState(() => {
     try { return localStorage.getItem('jwt'); } catch { return null; }
@@ -765,9 +767,17 @@ function Main() {
             >
               wsTorn Test
             </Link>
+            <Link
+              to="/museum"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="Museum point price"
+            >
+              Museum
+            </Link>
           </div>
         </div>
-      {!isMemoryPage && !isWsTornTestPage && (
+      {!isMemoryPage && !isWsTornTestPage && !isMuseumPage && (
         <>
           {/* Tableau bazaar réutilisable (lazy) */}
           <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
@@ -811,10 +821,23 @@ function Main() {
           </Suspense>
         )}
       />
+      <Route
+        path="/museum"
+        element={(
+          <Suspense fallback={<div style={{ padding: 20 }}>Loading museum...</div>}>
+            <Museum
+              wsStatus={wsMain.status}
+              wsMessages={wsMain.messages}
+              sendWs={sendWithPulse}
+              darkMode={darkMode}
+            />
+          </Suspense>
+        )}
+      />
       <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
       <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
     </Routes>
-  {!isMemoryPage && !isWsTornTestPage && (
+  {!isMemoryPage && !isWsTornTestPage && !isMuseumPage && (
     <>
       {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
       <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />

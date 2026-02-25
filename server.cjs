@@ -81,7 +81,7 @@ socketEvents.on('newSocket', async (socket, req) => {
 });
 
 const fastify = require('fastify')({
-    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
+    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/ubuntu/.tonstatsdubbo/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
     trustProxy: true
 });
 
@@ -258,7 +258,7 @@ fastify.register(require('@fastify/mongodb'), {
 
     if (!isTest) {
         try {
-            const pidDir = '/home/laurent/.tonstatsdubbo';
+            const pidDir = '/home/ubuntu/.tonstatsdubbo';
             if (!fs.existsSync(pidDir)) fs.mkdirSync(pidDir, { recursive: true });
             const pidFile = path.join(pidDir, 'tonstatsdubbo.pid');
             fs.writeFileSync(pidFile, process.pid.toString());

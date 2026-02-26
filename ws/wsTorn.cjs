@@ -1,5 +1,82 @@
-module.exports = async function wsTorn(socket, req, fastify) {
+module.exports = async function wsTorn(socket, req, fastify, options = {}) {
 try {
+    const { TornAPI } = require('torn-client');
+    const fromNum = Number(options && options.from);
+    const toNum = Number(options && options.to);
+    const fromOverride = Number.isFinite(fromNum) ? Math.floor(fromNum) : null;
+    const toOverride = Number.isFinite(toNum) ? Math.floor(toNum) : null;
+    const dryRun = !!(options && options.dryRun);
+    const requestId = options && options.requestId != null ? String(options.requestId) : null;
+    const apiKey = req && req.session ? req.session.TornAPIKey : null;
+    if (!apiKey) {
+        if (dryRun) {
+            try { socket.send(JSON.stringify({ type: 'wsTornTestResult', ok: false, requestId, error: 'Invalid session: missing TornAPIKey' })); } catch {}
+        } else {
+            try { socket.send(JSON.stringify({ type:'importProgress', kind:'logs', error: 'Invalid session: missing TornAPIKey' })); } catch {}
+        }
+        return;
+    }
+    const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
+    const tornClient = new TornAPI({
+        apiKeys: [apiKey],
+        ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+    });
+
+    if (dryRun) {
+        if (fromOverride == null || toOverride == null) {
+            try {
+                socket.send(JSON.stringify({
+                    type: 'wsTornTestResult',
+                    ok: false,
+                    requestId,
+                    error: 'from and to are required integers (unix seconds)'
+                }));
+            } catch {}
+            return;
+        }
+        if (fromOverride > toOverride) {
+            try {
+                socket.send(JSON.stringify({
+                    type: 'wsTornTestResult',
+                    ok: false,
+                    requestId,
+                    error: 'from must be <= to'
+                }));
+            } catch {}
+            return;
+        }
+        try {
+            fastify && fastify.log && fastify.log.info(`[wsTorn] dry-run logs from=${fromOverride} to=${toOverride}`);
+            const apiResponse = await tornClient.user.log({ from: fromOverride, to: toOverride });
+            let serializable = apiResponse;
+            try { serializable = JSON.parse(JSON.stringify(apiResponse)); } catch (_) {}
+            try {
+                socket.send(JSON.stringify({
+                    type: 'wsTornTestResult',
+                    ok: true,
+                    requestId,
+                    from: fromOverride,
+                    to: toOverride,
+                    response: serializable
+                }));
+            } catch {}
+        } catch (e) {
+            const errMsg = e && e.message ? e.message : String(e);
+            fastify && fastify.log && fastify.log.warn(`[wsTorn] dry-run request failed from=${fromOverride} to=${toOverride} ${errMsg}`);
+            try {
+                socket.send(JSON.stringify({
+                    type: 'wsTornTestResult',
+                    ok: false,
+                    requestId,
+                    from: fromOverride,
+                    to: toOverride,
+                    error: errMsg
+                }));
+            } catch {}
+        }
+        return;
+    }
+
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
     await ensureUserDbStructure(fastify, req.session.userID, fastify && fastify.log);
@@ -9,13 +86,18 @@ try {
         // Future extension: pré-créer d'autres collections si nécessaire.
         const nowSec = Math.floor(Date.now() / 1000);
         const INTERVAL = 900; // 15 min
-        let lastDoc = await logsCollection.findOne({}, { sort: { timestamp: -1 }, limit: 1 });
-        if (!lastDoc) {
-            // Fallback demandé: démarrer à timestamp fixe historique
-            lastDoc = { timestamp: 1716574649 };
+        let startTs;
+        if (fromOverride != null) {
+            startTs = fromOverride;
+        } else {
+            let lastDoc = await logsCollection.findOne({}, { sort: { timestamp: -1 }, limit: 1 });
+            if (!lastDoc) {
+                // Fallback demandé: démarrer à timestamp fixe historique
+                lastDoc = { timestamp: 1716574649 };
+            }
+            startTs = lastDoc.timestamp + 1;
         }
-        const startTs = lastDoc.timestamp + 1;
-        const endTs = nowSec;
+        const endTs = toOverride != null ? toOverride : nowSec;
         if (startTs > endTs) {
             try { socket.send(JSON.stringify({ type:'importedData', logsImported: 0, note:'up-to-date'})); } catch {}
             return;
@@ -30,12 +112,16 @@ try {
             const to = Math.min(t + INTERVAL, endTs);
             let jsonLogs;
             try {
-                const url = `${process.env.TORN_API_URL}user?selections=log&key=${req.session.TornAPIKey}&from=${t}&to=${to}`;
-                fastify.log.info(`[wsTorn] fetching ${url}`);
-                const response = await fetch(url);
-                jsonLogs = await response.json();
+                fastify.log.info(`[wsTorn] fetching logs from=${t} to=${to}`);
+                jsonLogs = await tornClient.user.log({ from: t, to });
             } catch (e) {
-                fastify && fastify.log && fastify.log.warn(`[wsTorn] fetch fail segment from=${t} to=${to} ${e.message}`);
+                if (e && typeof e.code === 'number') {
+                    fastify && fastify.log && fastify.log.warn(`[wsTorn] API error code=${e.code} msg=${e.message}`);
+                    await new Promise(r => setTimeout(r, 10000));
+                    t -= INTERVAL;
+                    continue;
+                }
+                fastify && fastify.log && fastify.log.warn(`[wsTorn] request fail segment from=${t} to=${to} ${e.message}`);
                 continue;
             }
             if (jsonLogs && jsonLogs.error) {

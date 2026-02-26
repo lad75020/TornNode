@@ -752,6 +752,14 @@ function Main() {
               Theme
             </button>
             <Link
+              to="/"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="Go to home page"
+            >
+              Home
+            </Link>
+            <Link
               to="/memory"
               className="btn btn-sm btn-outline-secondary"
               style={{ fontSize: 10 }}

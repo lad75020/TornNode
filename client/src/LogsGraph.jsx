@@ -7,12 +7,22 @@ import { openDB } from 'idb';
 import { Bar } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
 
+function getLastNDaysRange(days) {
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (Math.max(1, Number(days) || 1) - 1));
+  return {
+    from: start.toISOString().slice(0, 10),
+    to: end.toISOString().slice(0, 10),
+  };
+}
+
 export default function LogsGraph({ token, onAuth, logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
   const [data, setData] = useState({ labels: [], counts: [] });
   const [showChart, setShowChart] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [totalCount, setTotalCount] = useState(null);
   const [granularity, setGranularity] = useState('day'); // 'day' | 'week' | 'month'
+  const [zoom30Days, setZoom30Days] = useState(false);
   const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
@@ -124,8 +134,6 @@ export default function LogsGraph({ token, onAuth, logsUpdated, darkMode, chartH
         try { onMinDate(labels[0]); } catch {}
       }
       setData({ labels, counts });
-      const total = counts.reduce((acc, v) => acc + v, 0);
-      setTotalCount(total);
       setLoading(false);
     }
     fetchData();
@@ -133,16 +141,20 @@ export default function LogsGraph({ token, onAuth, logsUpdated, darkMode, chartH
 
   // Derived series: cumulative + average line
   const { cumulative, average } = computeSeries(data.counts);
+  const last30 = getLastNDaysRange(30);
+  const effectiveFrom = zoom30Days ? last30.from : dateFrom;
+  const effectiveTo = zoom30Days ? last30.to : dateTo;
   const filtered = (() => {
     const { labels, datasets } = filterDatasetsByDate(
       data.labels,
       [ { label: 'Count', data: data.counts } ],
-      dateFrom,
-      dateTo
+      effectiveFrom,
+      effectiveTo
     );
     return { labels, counts: datasets[0].data };
   })();
   const filteredSeries = computeSeries(filtered.counts);
+  const timeframeTotalLogs = filtered.counts.reduce((acc, v) => acc + Number(v || 0), 0);
 
   return (
     <div className="my-4">
@@ -167,6 +179,17 @@ export default function LogsGraph({ token, onAuth, logsUpdated, darkMode, chartH
                   <button type="button" className={`btn btn-sm ${granularity === 'week' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('week')}>Weekly</button>
                   <button type="button" className={`btn btn-sm ${granularity === 'month' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('month')}>Monthly</button>
                 </div>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${zoom30Days ? 'btn-primary' : 'btn-outline-primary'}`}
+                  onClick={() => {
+                    const next = !zoom30Days;
+                    setZoom30Days(next);
+                    if (next && granularity !== 'day') setGranularity('day');
+                  }}
+                >
+                  30 days
+                </button>
               </div>
               <div style={{ flex: 1 }}>
                 <Bar
@@ -203,7 +226,14 @@ export default function LogsGraph({ token, onAuth, logsUpdated, darkMode, chartH
                 />
               </div>
             </div>
-            {/* Champ texte retiré : total et moyenne visibles via lignes */}
+            <InlineStat
+              id="logs-graph-timeframe-total"
+              label="Total"
+              value={timeframeTotalLogs}
+              containerStyle={{ margin: '8px 0 0 0', maxWidth: 340 }}
+              labelStyle={{ fontSize: 12 }}
+              inputStyle={{ fontSize: 13, fontWeight: 600, maxWidth: 120, padding: '2px 8px', height: 30 }}
+            />
           </>
         )
       )}

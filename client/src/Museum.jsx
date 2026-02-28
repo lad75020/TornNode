@@ -104,6 +104,31 @@ export default function Museum({ wsStatus, wsMessages = [], sendWs, darkMode }) 
     pointResult && pointResult.minPrice,
     100,
   );
+  const arrowheadComparison = getSetComparison(
+    pointResult && pointResult.arrowheadSetPrice,
+    pointResult && pointResult.minPrice,
+    25,
+  );
+  const shabtiComparison = getSetComparison(
+    pointResult && pointResult.shabtiSculpturePrice,
+    pointResult && pointResult.minPrice,
+    500,
+  );
+  const ganeshaComparison = getSetComparison(
+    pointResult && pointResult.ganeshaSculpturePrice,
+    pointResult && pointResult.minPrice,
+    250,
+  );
+  const vairocanaComparison = getSetComparison(
+    pointResult && pointResult.vairocanaBuddhaPrice,
+    pointResult && pointResult.minPrice,
+    100,
+  );
+  const egyptianAmuletComparison = getSetComparison(
+    pointResult && pointResult.egyptianAmuletPrice,
+    pointResult && pointResult.minPrice,
+    10000,
+  );
 
   const positiveColor = darkMode ? '#64d88a' : '#1f8f49';
   const negativeColor = darkMode ? '#ff6f6f' : '#cc2a2a';
@@ -262,6 +287,151 @@ export default function Museum({ wsStatus, wsMessages = [], sendWs, darkMode }) 
               {coinComparison
                 ? `vs 100 pts (${formatUsd(coinComparison.equivalent)}): ${formatSignedUsd(coinComparison.diff)}`
                 : 'vs 100 pts: -'}
+            </div>
+          </div>
+        </div>
+        <div
+          className="mt-3"
+          style={{
+            borderTop: `1px solid ${darkMode ? '#2a2a2a' : '#eee'}`,
+            paddingTop: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, textTransform: 'uppercase', opacity: 0.75 }}>
+            Arrow Heads Set Price
+          </div>
+          <div className="d-flex align-items-baseline flex-wrap" style={{ gap: 10 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
+              {formatUsd(pointResult && pointResult.arrowheadSetPrice)}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: arrowheadComparison
+                  ? (arrowheadComparison.profitable ? positiveColor : negativeColor)
+                  : (darkMode ? '#aaa' : '#666'),
+              }}
+            >
+              {arrowheadComparison
+                ? `vs 25 pts (${formatUsd(arrowheadComparison.equivalent)}): ${formatSignedUsd(arrowheadComparison.diff)}`
+                : 'vs 25 pts: -'}
+            </div>
+          </div>
+        </div>
+        <div
+          className="mt-3"
+          style={{
+            borderTop: `1px solid ${darkMode ? '#2a2a2a' : '#eee'}`,
+            paddingTop: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, textTransform: 'uppercase', opacity: 0.75 }}>
+            Shabti Sculpture Price
+          </div>
+          <div className="d-flex align-items-baseline flex-wrap" style={{ gap: 10 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
+              {formatUsd(pointResult && pointResult.shabtiSculpturePrice)}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: shabtiComparison
+                  ? (shabtiComparison.profitable ? positiveColor : negativeColor)
+                  : (darkMode ? '#aaa' : '#666'),
+              }}
+            >
+              {shabtiComparison
+                ? `vs 500 pts (${formatUsd(shabtiComparison.equivalent)}): ${formatSignedUsd(shabtiComparison.diff)}`
+                : 'vs 500 pts: -'}
+            </div>
+          </div>
+        </div>
+        <div
+          className="mt-3"
+          style={{
+            borderTop: `1px solid ${darkMode ? '#2a2a2a' : '#eee'}`,
+            paddingTop: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, textTransform: 'uppercase', opacity: 0.75 }}>
+            Ganesha Sculpture Price
+          </div>
+          <div className="d-flex align-items-baseline flex-wrap" style={{ gap: 10 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
+              {formatUsd(pointResult && pointResult.ganeshaSculpturePrice)}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: ganeshaComparison
+                  ? (ganeshaComparison.profitable ? positiveColor : negativeColor)
+                  : (darkMode ? '#aaa' : '#666'),
+              }}
+            >
+              {ganeshaComparison
+                ? `vs 250 pts (${formatUsd(ganeshaComparison.equivalent)}): ${formatSignedUsd(ganeshaComparison.diff)}`
+                : 'vs 250 pts: -'}
+            </div>
+          </div>
+        </div>
+        <div
+          className="mt-3"
+          style={{
+            borderTop: `1px solid ${darkMode ? '#2a2a2a' : '#eee'}`,
+            paddingTop: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, textTransform: 'uppercase', opacity: 0.75 }}>
+            Vairocana Buddha Price
+          </div>
+          <div className="d-flex align-items-baseline flex-wrap" style={{ gap: 10 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
+              {formatUsd(pointResult && pointResult.vairocanaBuddhaPrice)}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: vairocanaComparison
+                  ? (vairocanaComparison.profitable ? positiveColor : negativeColor)
+                  : (darkMode ? '#aaa' : '#666'),
+              }}
+            >
+              {vairocanaComparison
+                ? `vs 100 pts (${formatUsd(vairocanaComparison.equivalent)}): ${formatSignedUsd(vairocanaComparison.diff)}`
+                : 'vs 100 pts: -'}
+            </div>
+          </div>
+        </div>
+        <div
+          className="mt-3"
+          style={{
+            borderTop: `1px solid ${darkMode ? '#2a2a2a' : '#eee'}`,
+            paddingTop: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, textTransform: 'uppercase', opacity: 0.75 }}>
+            Egyptian Amulet Price
+          </div>
+          <div className="d-flex align-items-baseline flex-wrap" style={{ gap: 10 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
+              {formatUsd(pointResult && pointResult.egyptianAmuletPrice)}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: egyptianAmuletComparison
+                  ? (egyptianAmuletComparison.profitable ? positiveColor : negativeColor)
+                  : (darkMode ? '#aaa' : '#666'),
+              }}
+            >
+              {egyptianAmuletComparison
+                ? `vs 10000 pts (${formatUsd(egyptianAmuletComparison.equivalent)}): ${formatSignedUsd(egyptianAmuletComparison.diff)}`
+                : 'vs 10000 pts: -'}
             </div>
           </div>
         </div>

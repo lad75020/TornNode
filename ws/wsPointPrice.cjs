@@ -82,6 +82,19 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
     { name: 'Gold Noble Coin', quantity: 1 },
   ].map((entry) => ({ ...entry, key: normalizeName(entry.name) }));
 
+  const ARROWHEAD_SET_REQUIREMENTS = [
+    { name: 'Obsidian Point', quantity: 1 },
+    { name: 'Quartz Point', quantity: 1 },
+    { name: 'Basalt Point', quantity: 1 },
+    { name: 'Chert Point', quantity: 1 },
+    { name: 'Chalcedony Point', quantity: 1 },
+    { name: 'Quartzite Point', quantity: 1 },
+  ].map((entry) => ({ ...entry, key: normalizeName(entry.name) }));
+  const SHABTI_SCULPTURE_KEY = normalizeName('Shabti Sculpture');
+  const GANESHA_SCULPTURE_KEY = normalizeName('Ganesha Sculpture');
+  const VAIROCANA_BUDDHA_KEY = normalizeName('Vairocana Buddha Sculpture');
+  const EGYPTIAN_AMULET_KEY = normalizeName('Egyptian Amulet');
+
   const getSetTotal = (requirements, priceByName) => {
     let total = 0;
     for (const reqEntry of requirements) {
@@ -102,6 +115,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
         quranScriptSetPrice: null,
         flowerSetPrice: null,
         coinSetPrice: null,
+        arrowheadSetPrice: null,
+        shabtiSculpturePrice: null,
+        ganeshaSculpturePrice: null,
+        vairocanaBuddhaPrice: null,
+        egyptianAmuletPrice: null,
       };
     }
 
@@ -300,6 +318,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
     const quranScriptSetPrice = getSetTotal(QURAN_SET_REQUIREMENTS, priceByName);
     const flowerSetPrice = getSetTotal(FLOWER_SET_REQUIREMENTS, priceByName);
     const coinSetPrice = getSetTotal(COIN_SET_REQUIREMENTS, priceByName);
+    const arrowheadSetPrice = getSetTotal(ARROWHEAD_SET_REQUIREMENTS, priceByName);
+    const shabtiSculpturePrice = priceByName.get(SHABTI_SCULPTURE_KEY) ?? null;
+    const ganeshaSculpturePrice = priceByName.get(GANESHA_SCULPTURE_KEY) ?? null;
+    const vairocanaBuddhaPrice = priceByName.get(VAIROCANA_BUDDHA_KEY) ?? null;
+    const egyptianAmuletPrice = priceByName.get(EGYPTIAN_AMULET_KEY) ?? null;
 
     return {
       sum,
@@ -309,6 +332,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
       quranScriptSetPrice,
       flowerSetPrice,
       coinSetPrice,
+      arrowheadSetPrice,
+      shabtiSculpturePrice,
+      ganeshaSculpturePrice,
+      vairocanaBuddhaPrice,
+      egyptianAmuletPrice,
     };
   };
 
@@ -347,6 +375,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
     let quranScriptSetPrice = null;
     let flowerSetPrice = null;
     let coinSetPrice = null;
+    let arrowheadSetPrice = null;
+    let shabtiSculpturePrice = null;
+    let ganeshaSculpturePrice = null;
+    let vairocanaBuddhaPrice = null;
+    let egyptianAmuletPrice = null;
     try {
       const plushieTotals = await getMuseumAndPlushiePricesFromRedis();
       plushies10PointsPrice = plushieTotals.sum;
@@ -355,6 +388,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
       quranScriptSetPrice = plushieTotals.quranScriptSetPrice;
       flowerSetPrice = plushieTotals.flowerSetPrice;
       coinSetPrice = plushieTotals.coinSetPrice;
+      arrowheadSetPrice = plushieTotals.arrowheadSetPrice;
+      shabtiSculpturePrice = plushieTotals.shabtiSculpturePrice;
+      ganeshaSculpturePrice = plushieTotals.ganeshaSculpturePrice;
+      vairocanaBuddhaPrice = plushieTotals.vairocanaBuddhaPrice;
+      egyptianAmuletPrice = plushieTotals.egyptianAmuletPrice;
       const plushiePricedItemsCount = plushieTotals.pricedCount;
       send({
         ...respBase,
@@ -366,6 +404,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
         quranScriptSetPrice,
         flowerSetPrice,
         coinSetPrice,
+        arrowheadSetPrice,
+        shabtiSculpturePrice,
+        ganeshaSculpturePrice,
+        vairocanaBuddhaPrice,
+        egyptianAmuletPrice,
         plushieItemsCount,
         plushiePricedItemsCount,
         time: Date.now(),
@@ -386,6 +429,11 @@ module.exports = async function wsPointPrice(socket, req, fastify) {
       quranScriptSetPrice,
       flowerSetPrice,
       coinSetPrice,
+      arrowheadSetPrice,
+      shabtiSculpturePrice,
+      ganeshaSculpturePrice,
+      vairocanaBuddhaPrice,
+      egyptianAmuletPrice,
       plushieItemsCount,
       plushiePricedItemsCount: 0,
       time: Date.now(),

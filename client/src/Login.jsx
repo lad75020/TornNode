@@ -1,31 +1,44 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  describeAccessKeyError,
+  getAccessKeySupport,
+  loginWithAccessKey
+} from './webauthn.js';
 
 export default function Login({ darkMode }) {
   const [username, setUsername] = useState('');
   const [passkey, setPasskey] = useState('');
   const [loading, setLoading] = useState(false);
+  const [accessKeyLoading, setAccessKeyLoading] = useState(false);
   const [error, setError] = useState('');
+  const accessKeySupport = getAccessKeySupport();
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
+  const finishLogin = (token) => {
+    try { localStorage.setItem('jwt', token); } catch (_) {}
+    window.location.href = '/';
+  };
+
+  const onSubmit = async (event) => {
+    event.preventDefault();
     setError('');
-    if (!username || !passkey) { setError('Please enter username and passkey'); return; }
+    if (!username || !passkey) {
+      setError('Please enter username and password');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch('/authenticate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // ensure session cookie is set server-side
+        credentials: 'include',
         body: JSON.stringify({ username, passkey })
       });
       const data = await res.json().catch(() => ({}));
-      if (data && data.success && data.token) {
-        try { localStorage.setItem('jwt', data.token); } catch(_) {}
-        // Reload to let Main reinitialize websockets and state
-        window.location.href = '/';
+      if (data?.success && data?.token) {
+        finishLogin(data.token);
       } else {
-        setError(data && data.message ? data.message : 'Authentication failed');
+        setError(data?.message || 'Authentication failed');
       }
     } catch (err) {
       setError(err?.message || 'Network error');
@@ -34,9 +47,26 @@ export default function Login({ darkMode }) {
     }
   };
 
+  const onAccessKeyLogin = async () => {
+    setError('');
+    setAccessKeyLoading(true);
+    try {
+      const data = await loginWithAccessKey();
+      if (data?.token) {
+        finishLogin(data.token);
+      } else {
+        setError('Access key login failed');
+      }
+    } catch (err) {
+      setError(describeAccessKeyError(err));
+    } finally {
+      setAccessKeyLoading(false);
+    }
+  };
+
   return (
     <div className={`d-flex align-items-center justify-content-center ${darkMode ? 'dark-mode' : 'light-mode'}`} style={{ minHeight: '100vh', padding: 16 }}>
-      <div className="card" style={{ maxWidth: 420, width: '100%', ...(darkMode ? { background:'#1b1b1b', color:'#e0e0e0', border:'1px solid #2a2a2a' } : {}) }}>
+      <div className="card" style={{ maxWidth: 420, width: '100%', ...(darkMode ? { background: '#1b1b1b', color: '#e0e0e0', border: '1px solid #2a2a2a' } : {}) }}>
         <div className="card-body">
           <h5 className="card-title" style={{ marginBottom: 12 }}>Login</h5>
           <div className="text-center" style={{ marginBottom: 16 }}>
@@ -53,20 +83,20 @@ export default function Login({ darkMode }) {
                 type="text"
                 className="form-control"
                 value={username}
-                onChange={e => setUsername(e.target.value)}
+                onChange={(event) => setUsername(event.target.value)}
                 autoComplete="username"
-                disabled={loading}
+                disabled={loading || accessKeyLoading}
               />
             </div>
             <div className="mb-3">
-              <label className="form-label">Passkey</label>
+              <label className="form-label">Password</label>
               <input
                 type="password"
                 className="form-control"
                 value={passkey}
-                onChange={e => setPasskey(e.target.value)}
+                onChange={(event) => setPasskey(event.target.value)}
                 autoComplete="current-password"
-                disabled={loading}
+                disabled={loading || accessKeyLoading}
               />
             </div>
             {error && (
@@ -74,72 +104,30 @@ export default function Login({ darkMode }) {
                 {error}
               </div>
             )}
-            <div className="d-flex justify-content-between align-items-center" style={{ gap: 8 }}>
+            {!accessKeySupport.supported && (
+              <div className="alert alert-warning py-2" role="alert" style={{ fontSize: 13 }}>
+                {accessKeySupport.reason}
+              </div>
+            )}
+            <div className="d-flex justify-content-between align-items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
               <Link to="/public-bazaar" className="btn btn-outline-secondary" aria-label="Open public market page">
                 View Market (public)
               </Link>
-              <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading ? 'Signing in…' : 'Sign in'}
-              </button>
+              <div className="d-flex" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-outline-primary" disabled={accessKeyLoading || loading || !accessKeySupport.supported} onClick={onAccessKeyLogin}>
+                  {accessKeyLoading ? 'Waiting…' : 'Use access key'}
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={loading || accessKeyLoading}>
+                  {loading ? 'Signing in…' : 'Sign in'}
+                </button>
+              </div>
             </div>
           </form>
+          <p style={{ marginTop: 14, marginBottom: 0, fontSize: 13, opacity: 0.75 }}>
+            Add access keys after signing in once with your password.
+          </p>
         </div>
       </div>
     </div>
-  );
-}
-
-function LoginForm({ onAuth }) {
-  const [username, setLogin] = useState('');
-  const [passkey, setPassword] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-  const res = await fetch('/authenticate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username, passkey})
-      });
-      if (!res.ok) throw new Error('Authentication failed');
-      const data = await res.json();
-      if (data.token) {
-        onAuth(data.token);
-      } else {
-        setError('Invalid credentials');
-      }
-    } catch (err) {
-      setError('Erreur d’authentification');
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} style={{ margin: 20 }}>
-      <div>
-        <input
-          type="text"
-          value={username}
-          onChange={e => setLogin(e.target.value)}
-          placeholder="Login"
-          style={{ padding: 8, width: 200, marginBottom: 8 }}
-        />
-      </div>
-      <div>
-        <input
-          type="password"
-          value={passkey}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="Mot de passe"
-          style={{ padding: 8, width: 200, marginBottom: 8 }}
-        />
-      </div>
-      <div style={{ width: '100%' }}>
-        <button type="submit" className="btn btn-primary mb-4">Se&nbsp;connecter</button>
-      </div>
-      {error && <div style={{ color: 'red', marginTop: 8 }}>{error}</div>}
-    </form>
   );
 }

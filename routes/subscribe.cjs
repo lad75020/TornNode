@@ -1,19 +1,7 @@
-const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const { User, connectSessionsDb } = require('../utils/userModel.cjs');
 
 module.exports = async function (fastify, isTest) {
-  const userSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    passkey: { type: String, required: true },
-    TornAPIKey: { type: String, required: true },
-    type: { type: String, default: 'user' },
-    id: { type: Number, required: true, unique: true },
-    email: { type: String }
-  }, { timestamps: true });
-
-  // Reuse existing model if already compiled (Hot reload safe)
-  const User = mongoose.models.User || mongoose.model('User', userSchema);
-
   fastify.post('/subscribe', {
     config: {
       rateLimit: {
@@ -36,7 +24,7 @@ module.exports = async function (fastify, isTest) {
 
     try {
       // Connect (idempotent) to sessions DB
-      await mongoose.connect(`${isTest?process.env.MONGODB_URI_TEST:process.env.MONGODB_URI}/sessions`);
+      await connectSessionsDb(isTest ? process.env.MONGODB_URI_TEST : process.env.MONGODB_URI);
 
       const existing = await User.findOne({ $or: [{ username }, { id }] }, { _id: 1 }).lean();
       if (existing) {

@@ -59,6 +59,7 @@ const CompanyDetailsHistoryChart = lazy(() => import('./CompanyDetailsHistoryCha
 const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
+const AccessKeyManager = lazy(() => import('./AccessKeyManager.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
 const MemoryGraphExplorer = lazy(() => import('./MemoryGraphExplorer.jsx'));
 const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
@@ -306,6 +307,7 @@ function Main() {
   // Slider
   const slider = useChartSlider(chartComponents.length);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [showAccessKeys, setShowAccessKeys] = useState(false);
   const [selectedItemType, setSelectedItemType] = useState('');
 
   const handleToggleTheme = cycleTheme;
@@ -519,6 +521,7 @@ function Main() {
     try { wsMain.wsRef?.current?.close?.(); } catch {}
     try { wsBazaar.wsRef?.current?.close?.(); } catch {}
     try { localStorage.removeItem('jwt'); } catch {}
+    setShowAccessKeys(false);
     setToken(null);
   };
 
@@ -783,6 +786,15 @@ function Main() {
             >
               Museum
             </Link>
+            <button
+              type="button"
+              onClick={() => setShowAccessKeys(true)}
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="Manage WebAuthn access keys"
+            >
+              Access Keys
+            </button>
           </div>
         </div>
       {!isMemoryPage && !isWsTornTestPage && !isMuseumPage && (
@@ -1031,6 +1043,15 @@ function Main() {
             </div>
           </div>
         </div>
+      )}
+      {showAccessKeys && (
+        <Suspense fallback={null}>
+          <AccessKeyManager
+            darkMode={darkMode}
+            open={showAccessKeys}
+            onClose={() => setShowAccessKeys(false)}
+          />
+        </Suspense>
       )}
       {token && (
         <div className="d-flex mb-3" style={{ gap: 6 }}>

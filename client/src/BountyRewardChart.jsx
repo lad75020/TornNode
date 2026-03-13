@@ -6,7 +6,7 @@ import { getLogsByLogId } from './dbLayer.js';
 import useChartTheme from './useChartTheme.js';
 
 export default function BountyRewardChart({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
-  const [data, setData] = useState({ labels: [], counts: [], rewards: [] });
+  const [data, setData] = useState({ labels: [], counts: [], rewards: [], totalCount: 0 });
   const [showChart, setShowChart] = useState(true);
   const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState('day'); // 'day' | 'week' | 'month'
@@ -20,6 +20,7 @@ export default function BountyRewardChart({ logsUpdated, darkMode, chartHeight =
         const all = await getLogsByLogId(6710);
         if (canceled) return;
         const buckets = {}; // key -> { count, rewardSum, sortKey }
+        const totalCount = Array.isArray(all) ? all.length : 0;
 
         function addToBucket(key, sortKey, reward) {
           if (!buckets[key]) buckets[key] = { count: 0, rewardSum: 0, sortKey };
@@ -117,13 +118,13 @@ export default function BountyRewardChart({ logsUpdated, darkMode, chartHeight =
           if (labels.length && granularity === 'day' && onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(labels[0])) {
             try { onMinDate(labels[0]); } catch { /* ignore */ }
           }
-          setData({ labels, counts, rewards });
+          setData({ labels, counts, rewards, totalCount });
           setLoading(false);
         }
       } catch (err) {
         console.error('Failed to load bounty reward data', err);
         if (!canceled) {
-          setData({ labels: [], counts: [], rewards: [] });
+          setData({ labels: [], counts: [], rewards: [], totalCount: 0 });
           setLoading(false);
         }
       }
@@ -158,7 +159,7 @@ export default function BountyRewardChart({ logsUpdated, darkMode, chartHeight =
         onClick={() => setShowChart((prev) => !prev)}
         title="Click to show/hide chart"
       >
-        Bounties (log 6710) per {granularity}
+        Bounties per {granularity}
       </h5>
       {loading ? (
         <div>
@@ -166,46 +167,60 @@ export default function BountyRewardChart({ logsUpdated, darkMode, chartHeight =
         </div>
       ) : (
         showChart && (
-          <div style={{ display: 'flex', gap: 8, height: chartHeight }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div className="btn-group-vertical" role="group" aria-label="Granularity">
-                <button type="button" className={`btn btn-sm ${granularity === 'day' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('day')}>Daily</button>
-                <button type="button" className={`btn btn-sm ${granularity === 'week' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('week')}>Weekly</button>
-                <button type="button" className={`btn btn-sm ${granularity === 'month' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('month')}>Monthly</button>
-              </div>
+          <div>
+            <div className="mb-2" style={{ maxWidth: 220 }}>
+              <label htmlFor="bounty-log-6710-total" className="form-label mb-1">
+                Total count of log 6710
+              </label>
+              <input
+                id="bounty-log-6710-total"
+                type="text"
+                className="form-control form-control-sm"
+                value={data.totalCount.toLocaleString()}
+                readOnly
+              />
             </div>
-            <div style={{ flex: 1 }}>
-              <Bar
-                data={{
-                  labels: filtered.labels,
-                  datasets: [
-                    ds('bar', 0, filtered.counts, { label: 'Entries', yAxisID: 'y', borderWidth: 1 }),
-                    ds('line', 1, rewardSeries.cumulative, { label: 'Cumulative bounty_reward', yAxisID: 'y1', fill: false, tension: 0.15, pointRadius: 2 }),
-                  ],
-                }}
-                options={themedOptions({
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  interaction: { mode: 'index', intersect: false },
-                  plugins: {
-                    legend: { display: true },
-                    title: { display: false },
-                    tooltip: {
-                      callbacks: {
-                        label(ctx) {
-                          const dsLabel = ctx.dataset.label || '';
-                          return `${dsLabel}: ${ctx.parsed.y?.toLocaleString?.() ?? ctx.parsed.y}`;
+            <div style={{ display: 'flex', gap: 8, height: chartHeight }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="btn-group-vertical" role="group" aria-label="Granularity">
+                  <button type="button" className={`btn btn-sm ${granularity === 'day' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('day')}>Daily</button>
+                  <button type="button" className={`btn btn-sm ${granularity === 'week' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('week')}>Weekly</button>
+                  <button type="button" className={`btn btn-sm ${granularity === 'month' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setGranularity('month')}>Monthly</button>
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Bar
+                  data={{
+                    labels: filtered.labels,
+                    datasets: [
+                      ds('bar', 0, filtered.counts, { label: 'Entries', yAxisID: 'y', borderWidth: 1 }),
+                      ds('line', 1, rewardSeries.cumulative, { label: 'Cumulative bounty_reward', yAxisID: 'y1', fill: false, tension: 0.15, pointRadius: 2 }),
+                    ],
+                  }}
+                  options={themedOptions({
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                      legend: { display: true },
+                      title: { display: false },
+                      tooltip: {
+                        callbacks: {
+                          label(ctx) {
+                            const dsLabel = ctx.dataset.label || '';
+                            return `${dsLabel}: ${ctx.parsed.y?.toLocaleString?.() ?? ctx.parsed.y}`;
+                          },
                         },
                       },
                     },
-                  },
-                  scales: {
-                    x: { title: { display: true, text: 'Timestamp' } },
-                    y: { title: { display: true, text: 'Count' }, beginAtZero: true },
-                    y1: { position: 'right', title: { display: true, text: 'Cumulative bounty_reward' }, beginAtZero: true, grid: { drawOnChartArea: false } },
-                  },
-                })}
-              />
+                    scales: {
+                      x: { title: { display: true, text: 'Timestamp' } },
+                      y: { title: { display: true, text: 'Count' }, beginAtZero: true },
+                      y1: { position: 'right', title: { display: true, text: 'Cumulative bounty_reward' }, beginAtZero: true, grid: { drawOnChartArea: false } },
+                    },
+                  })}
+                />
+              </div>
             </div>
           </div>
         )

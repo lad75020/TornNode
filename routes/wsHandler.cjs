@@ -1,6 +1,21 @@
 // wsHandler.js
 const socketEvents = require('../socketEvents.cjs');
 const dailyPriceAverager = require('../dailyPriceAverager.cjs');
+const { User, connectSessionsDb } = require('../utils/userModel.cjs');
+
+function getJwtUserId(req) {
+    if (!req || !req.user) return null;
+    return req.user.userID || req.user.id || req.user.sub || null;
+}
+
+function normalizeUserId(rawUserId) {
+    if (rawUserId == null) return null;
+    const text = String(rawUserId).trim();
+    if (!text) return null;
+    const numeric = Number(text);
+    return Number.isFinite(numeric) ? numeric : text;
+}
+
 module.exports = (fastify, isTest) => {
     fastify.register(async function (fastify) {
     fastify.get('/ws', {
@@ -15,16 +30,62 @@ module.exports = (fastify, isTest) => {
             const connId = Date.now().toString(36)+Math.random().toString(36).slice(2,7);
             const PING_INTERVAL = parseInt(process.env.WS_PING_INTERVAL_MS || '30000');
             const PONG_TIMEOUT = parseInt(process.env.WS_PONG_TIMEOUT_MS || (PING_INTERVAL * 2).toString());
+            const mongoBaseUri = isTest ? process.env.MONGODB_URI_TEST : process.env.MONGODB_URI;
             let lastPong = Date.now();
             try { fastify.log.info({ connId, ip: req.socket.remoteAddress }, '[ws] new /ws connection'); } catch(_) {}
 
             // Si l'auth JWT a été décodée côté verifyClient, propager un userID dans la session
             try {
                 if (!req.session) req.session = {};
-                if (!req.session.userID && req.user && (req.user.userID || req.user.id || req.user.sub)) {
-                    req.session.userID = req.user.userID || req.user.id || req.user.sub;
+                if (!req.session.userID) {
+                    const jwtUserId = normalizeUserId(getJwtUserId(req));
+                    if (jwtUserId != null) req.session.userID = jwtUserId;
                 }
             } catch {}
+
+            async function ensureSocketSession() {
+                try {
+                    if (req?.session?.TornAPIKey) return true;
+                    const candidateUserId = normalizeUserId(req?.session?.userID || getJwtUserId(req));
+                    if (candidateUserId == null) return false;
+
+                    if (!req.session) req.session = {};
+                    if (!req.session.userID) req.session.userID = candidateUserId;
+
+                    if (!req.__wsSessionHydrationPromise) {
+                        req.__wsSessionHydrationPromise = (async () => {
+                            await connectSessionsDb(mongoBaseUri);
+                            const user = await User.findOne(
+                                { id: candidateUserId },
+                                { username: 1, TornAPIKey: 1, type: 1, id: 1 }
+                            ).lean();
+                            if (!user) {
+                                try { fastify.log.warn({ connId, userID: candidateUserId }, '[ws] JWT user not found in sessions DB'); } catch (_) {}
+                                return false;
+                            }
+
+                            req.session.userID = user.id;
+                            req.session.username = user.username;
+                            req.session.userType = user.type;
+                            req.session.TornAPIKey = user.TornAPIKey;
+
+                            if (typeof req.session.save === 'function') {
+                                try { await req.session.save(); } catch (_) {}
+                            }
+
+                            try { fastify.log.debug({ connId, userID: user.id }, '[ws] session hydrated from JWT'); } catch (_) {}
+                            return true;
+                        })().finally(() => {
+                            req.__wsSessionHydrated = true;
+                        });
+                    }
+
+                    return Boolean(await req.__wsSessionHydrationPromise) && Boolean(req?.session?.TornAPIKey);
+                } catch (err) {
+                    try { fastify.log.warn({ connId, err: err.message }, '[ws] session hydration failed'); } catch (_) {}
+                    return false;
+                }
+            }
 
             socketEvents.emit('newSocket', socket, req);
             // Envoyer l'userID au front pour usage localStorage
@@ -93,6 +154,13 @@ module.exports = (fastify, isTest) => {
                         lastPong = Date.now();
                         try { socket.send('pong'); } catch(_) {}
                         return;
+                    default:
+                        break;
+                }
+
+                await ensureSocketSession();
+
+                switch (message) {
                     case 'torn':
                         fastify.log.info({ connId }, '[ws] torn command');
                                                 // Marquer l'état d'import logs + suivi progress

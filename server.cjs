@@ -1,13 +1,14 @@
 require('dotenv').config({override:true});
 const path = require('path');
-const yargs = require('yargs');
+const yargs = require('yargs/yargs');
+const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
 const crypto = require('crypto');
 const socketEvents = require('./socketEvents.cjs');
 const RedisStore = require('connect-redis').RedisStore;
 const jwt = require('jsonwebtoken');
 
-const argv = yargs
+const argv = yargs(hideBin(process.argv))
     .option('port', {
         alias: 'p',
         description: 'Port to run the server on',
@@ -31,7 +32,7 @@ const argv = yargs
         type: 'boolean'
     })
     .help()
-    .argv;
+    .parse();
 
 
 const port = (typeof argv.port === 'number' && !Number.isNaN(argv.port))

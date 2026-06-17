@@ -27,7 +27,7 @@
     "idb": "^8.0.3",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.16.0",
-    "mongoose": "^8.14.2",
+    "mongoose": "^8.22.1",
     "nanoid": "^5.1.5",
     "passport": "^0.7.0",
     "react": "^19.1.1",

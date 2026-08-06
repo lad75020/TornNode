@@ -1,34 +1,33 @@
 // wsHandler.js
 const socketEvents = require('../socketEvents.cjs');
 const dailyPriceAverager = require('../dailyPriceAverager.cjs');
+async function authorizeSocket(fastify, socket, request, { checkSession = false } = {}) {
+    let result;
+    try { result = await fastify.authSessions.validateAndRenew(request); } catch (_) { result = { ok: false }; }
+    if (result.ok) return true;
+    try { socket.send(JSON.stringify(checkSession ? { session_active: false } : { type: 'auth', ok: false, error: 'unauthenticated' })); } catch {}
+    try { socket.close(4401, 'unauthenticated'); } catch {}
+    return false;
+}
 module.exports = (fastify, isTest) => {
     fastify.register(async function (fastify) {
-    fastify.get('/ws', { websocket: true }, (socket , req /*, reply */ ) => {
+    fastify.get('/ws', { websocket: true }, async (socket , req /*, reply */ ) => {
+            if (!await authorizeSocket(fastify, socket, req)) return;
+            fastify.authSessions.registerSocket?.(req, socket);
             const connId = Date.now().toString(36)+Math.random().toString(36).slice(2,7);
             const PING_INTERVAL = parseInt(process.env.WS_PING_INTERVAL_MS || '30000');
             const PONG_TIMEOUT = parseInt(process.env.WS_PONG_TIMEOUT_MS || (PING_INTERVAL * 2).toString());
             let lastPong = Date.now();
             try { fastify.log.info({ connId, ip: req.socket.remoteAddress }, '[ws] new /ws connection'); } catch(_) {}
 
-            // Si l'auth JWT a été décodée côté verifyClient, propager un userID dans la session
-            try {
-                if (!req.session) req.session = {};
-                if (!req.session.userID && req.user && (req.user.userID || req.user.id || req.user.sub)) {
-                    req.session.userID = req.user.userID || req.user.id || req.user.sub;
-                }
-            } catch {}
-
             socketEvents.emit('newSocket', socket, req);
-            // Envoyer l'userID au front pour usage localStorage
+            // The authenticated server session is the sole identity source.
             try {
-                if (req?.session?.userID) {
+                if (req?.session?.userId) {
                     // Création structure DB user (asynchrone sans bloquer l'envoi du message)
                     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-                    ensureUserDbStructure(fastify, req.session.userID, fastify.log).catch(()=>{});
-                    socket.send(JSON.stringify({ type:'session', userID: req.session.userID, time: Date.now() }));
-                } else if (req?.authError) {
-                    // Retourner l'erreur côté client mais ne pas fermer brutalement
-                    try { socket.send(JSON.stringify({ type:'auth', ok:false, error:req.authError })); } catch {}
+                    ensureUserDbStructure(fastify, req.session.userId, fastify.log).catch(()=>{});
+                    socket.send(JSON.stringify({ type:'session', userID: req.session.userId, time: Date.now() }));
                 }
             } catch(_){ }
 
@@ -73,6 +72,17 @@ module.exports = (fastify, isTest) => {
                     msg = '';
                 }
                 const message = msg.trim();
+                if (message === 'destroySession') socket.__authDestroying = true;
+                if (socket.__authDestroying && message !== 'destroySession') {
+                    try { socket.send(JSON.stringify({ type: 'auth', ok: false, error: 'unauthenticated' })); } catch {}
+                    try { socket.close(4401, 'unauthenticated'); } catch {}
+                    return;
+                }
+                if (!await authorizeSocket(fastify, socket, req, { checkSession: message === 'checkSession' })) return;
+                // Browser-boundary tests exercise session validation and logout only.
+                // Suppress unrelated private data jobs so isolated synthetic users
+                // cannot trigger production work or external API/database access.
+                if (isTest && !['ping', 'checkSession', 'destroySession'].includes(message)) return;
                 if (message.length > 1000) {
                     fastify.log.warn({ connId, len: message.length }, '[ws] message truncated');
                 }
@@ -164,7 +174,7 @@ module.exports = (fastify, isTest) => {
                         return;
                     case 'destroySession':
                         fastify.log.info({ connId }, '[ws] destroySession command');
-                        require('../ws/wsDestroySession.cjs')(socket, req);
+                        await require('../ws/wsDestroySession.cjs')(socket, req, fastify);
                         return;
                     case 'deduplicate':
                         fastify.log.info({ connId }, '[ws] deduplicate command');
@@ -491,3 +501,4 @@ module.exports = (fastify, isTest) => {
         });
     });
 };
+module.exports.authorizeSocket = authorizeSocket;

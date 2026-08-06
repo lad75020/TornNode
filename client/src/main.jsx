@@ -14,7 +14,6 @@ import {
   BrowserRouter,
   Routes,
   Route,
-  Link,
   useNavigate,
   useParams,
   useLocation
@@ -60,7 +59,6 @@ const BloodAidDailyChart = lazy(() => import('./BloodAidDailyChart.jsx'));
 const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
-const MemoryGraphExplorer = lazy(() => import('./MemoryGraphExplorer.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -227,39 +225,29 @@ const chartComponents = [
 
 function Main() {
   const location = useLocation();
-  const isMemoryPage = location.pathname.startsWith('/memory');
-  // Track auth token in state so UI reacts immediately on logout/login
-  const [token, setToken] = useState(() => {
-    try { return localStorage.getItem('jwt'); } catch { return null; }
-  });
-  // Keep token in sync if another tab changes it
+  // Authentication evidence remains the HttpOnly cookie; the client keeps no token.
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   useEffect(() => {
-    const onStorage = (e) => {
-      if (e && e.key === 'jwt') setToken(e.newValue);
-    };
-    try { window.addEventListener('storage', onStorage); } catch {}
-    return () => { try { window.removeEventListener('storage', onStorage); } catch {}; };
+    let active = true;
+    fetch('/session', { credentials: 'include' })
+      .then((response) => response.ok)
+      .catch(() => false)
+      .then((ok) => { if (active) { setAuthenticated(ok); setAuthChecked(true); } });
+    return () => { active = false; };
   }, []);
+  const token = authenticated ? 'session' : null;
   const { darkMode, userTheme, cycleTheme } = useTheme();
-  // Username derived from JWT for UI header
+  // Identity is intentionally not decoded from client-held credentials.
   const [usernameUpper, setUsernameUpper] = useState('');
   useEffect(() => {
-    if (!token) { setUsernameUpper(''); return; }
-    try {
-      const part = token.split('.')[1];
-      if (!part) { setUsernameUpper(''); return; }
-      let b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-      while (b64.length % 4) b64 += '=';
-      const jsonStr = atob(b64);
-      const payload = JSON.parse(jsonStr);
-      const u = (payload && payload.username) ? String(payload.username).toUpperCase() : '';
-      setUsernameUpper(u);
-    } catch { setUsernameUpper(''); }
-  }, [token]);
+    setUsernameUpper('');
+  }, [authenticated]);
   // Note: do not early-return here to keep Hooks order stable.
   // WebSockets
-  const wsMain = useAppWebSocket('/ws', token);
-  const wsBazaar = useAppWebSocket('/wsb', token);
+  const unauthorized = useCallback(() => setAuthenticated(false), []);
+  const wsMain = useAppWebSocket('/ws', authenticated, unauthorized);
+  const wsBazaar = useAppWebSocket('/wsb', authenticated, unauthorized);
   // Pulsations activité WS principale
   const [wsRecvPulse, setWsRecvPulse] = useState(false);
   const [wsSendPulse, setWsSendPulse] = useState(false);
@@ -509,13 +497,18 @@ function Main() {
     };
     requestAnimationFrame(check);
   };
-  const handleLogout = () => {
-    // Ask server to drop session and close sockets; then clear JWT and re-render Login
-    try { wsMain.send('destroySession'); } catch {}
+  const handleLogout = async () => {
     try { wsMain.wsRef?.current?.close?.(); } catch {}
     try { wsBazaar.wsRef?.current?.close?.(); } catch {}
-    try { localStorage.removeItem('jwt'); } catch {}
-    setToken(null);
+    try {
+      const response = await fetch('/logout', { method: 'POST', credentials: 'include' });
+      if (!response.ok) throw new Error('logout failed');
+      setAuthenticated(false);
+    } catch {
+      // Existing sockets are already closed; leave a safe retry path.
+      setAuthenticated(false);
+      window.alert('Sign-out could not be completed. Please try again.');
+    }
   };
 
   const handleStoreLogsAndRefresh = async (setStoreProgress) => {
@@ -678,7 +671,8 @@ function Main() {
       </Suspense>
     );
   }
-  if (!token) {
+  if (!authChecked) return <div role="status">Checking session…</div>;
+  if (!authenticated) {
     return (
       <StrictMode>
         <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div> }>
@@ -747,52 +741,30 @@ function Main() {
             >
               Theme
             </button>
-            <Link
-              to="/memory"
-              className="btn btn-sm btn-outline-secondary"
-              style={{ fontSize: 10 }}
-              title="Memory MCP view"
-            >
-              Memory
-            </Link>
           </div>
         </div>
-      {!isMemoryPage && (
-        <>
-          {/* Tableau bazaar réutilisable (lazy) */}
-          <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
-            <BazaarTable
-              bazaarRows={bazaarRows}
-              watchedItems={watchedItems}
-              priceThresholds={priceThresholds}
-              blinkingItems={blinkingItems}
-              onThresholdChange={(itemId, value) => {
-                setPriceThresholds(prev => {
-                  const updated = { ...prev, [itemId]: value };
-                  try { localStorage.setItem('priceThresholds', JSON.stringify(updated)); } catch(_) {}
-                  return updated;
-                });
-              }}
-              onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch(_) {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
-              sendWs={sendWithPulse}
-            />
-          </Suspense>
-        </>
-      )}
+      {/* Tableau bazaar réutilisable (lazy) */}
+      <Suspense fallback={<div style={{padding:20}}>Chargement bazaar…</div>}>
+        <BazaarTable
+          bazaarRows={bazaarRows}
+          watchedItems={watchedItems}
+          priceThresholds={priceThresholds}
+          blinkingItems={blinkingItems}
+          onThresholdChange={(itemId, value) => {
+            setPriceThresholds(prev => {
+              const updated = { ...prev, [itemId]: value };
+              try { localStorage.setItem('priceThresholds', JSON.stringify(updated)); } catch(_) {}
+              return updated;
+            });
+          }}
+          onUnwatch={(itemId) => { try { wsBazaar.send(JSON.stringify({ type: 'unwatch', itemId })); } catch(_) {}; setWatchedItems(prev => prev.filter(id => id !== itemId)); }}
+          sendWs={sendWithPulse}
+        />
+      </Suspense>
     <Routes>
-      <Route
-        path="/memory"
-        element={(
-          <Suspense fallback={<div style={{ padding: 20 }}>Chargement mémoire…</div>}>
-            <MemoryGraphExplorer darkMode={darkMode} />
-          </Suspense>
-        )}
-      />
       <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
       <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
     </Routes>
-  {!isMemoryPage && (
-    <>
       {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
       <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />
       {/* Barre d'outils et modals */}
@@ -932,8 +904,6 @@ function Main() {
           )}
         </div>
       </div>
-    </>
-  )}
   {/* Modal for Autocomplete */}
       {showAutocomplete && (
         <div

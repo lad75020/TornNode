@@ -8,7 +8,7 @@ module.exports = async function (socket, req, fastify) {
     let coll;
     try {
   const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-  await ensureUserDbStructure(fastify, req.session.userID, null);
+  await ensureUserDbStructure(fastify, req.session.userId, null);
   const db = getUserDb(fastify, req);
       coll = db.collection('Stats');
     } catch(e){

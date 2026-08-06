@@ -26,3 +26,4 @@ client/dist/**
 scripts/compareClothingItems.js
 tornnode.code-workspace
 scripts/fetchClothingItems.js
+/.specify

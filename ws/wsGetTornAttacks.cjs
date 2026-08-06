@@ -11,7 +11,7 @@ module.exports = async function wsGetTornAttacks(socket, req, fastify, payload) 
     }
   const getUserDb = require('../utils/getUserDb.cjs');
   const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-  await ensureUserDbStructure(fastify, req.session.userID, fastify?.log);
+  await ensureUserDbStructure(fastify, req.session.userId, fastify?.log);
   const database = getUserDb(fastify, req);
     const attacksCollection = database.collection('attacks');
     const aFilter = { started: { $gt: parseInt(from, 10), $lt: parseInt(to, 10) } };
@@ -19,7 +19,7 @@ module.exports = async function wsGetTornAttacks(socket, req, fastify, payload) 
     const cursor = attacksCollection.find(aFilter, options);
     let attacks = 0, defends = 0, wins = 0, losses = 0;
     for await (const doc of cursor) {
-      if (doc.attacker && doc.attacker.id === req.session.userID) {
+      if (doc.attacker && doc.attacker.id === req.session.userId) {
         attacks++;
         if (!['Lost'].includes(doc.result)) wins++; else losses++;
       } else if (doc.attacker) {

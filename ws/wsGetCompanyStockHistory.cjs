@@ -18,7 +18,7 @@ module.exports = async function wsGetCompanyStockHistory(socket, req, fastify, p
     if (from > to) [from, to] = [to, from];
     const top = (typeof parsed.top === 'number' && parsed.top > 0 && parsed.top <= 50) ? parsed.top : 5;
 
-    const db = fastify.mongo.client.db(req.session.userID.toString());
+    const db = fastify.mongo.client.db(req.session.userId.toString());
     const col = db.collection('CompanyStock');
 
     const docs = await col.find({ timestamp: { $gte: from, $lte: to } }, { projection: { _id:0 } })

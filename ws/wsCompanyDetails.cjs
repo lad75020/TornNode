@@ -18,7 +18,7 @@ module.exports = async function wsCompanyDetails(socket, req, fastify, parsed) {
     extract: j => j.company_detailed,
     fieldName: 'details',
     reuseWindowMs,
-    databaseName: req.session.userID.toString()
+    databaseName: req.session.userId.toString()
   });
   if (result.error) {
     try { socket.send(JSON.stringify({ ...respBase, ok:false, error: result.error })); } catch {}

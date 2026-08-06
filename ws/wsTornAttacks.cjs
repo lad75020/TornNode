@@ -2,7 +2,7 @@ module.exports = async function (socket, req, fastify) {
    try {
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-    await ensureUserDbStructure(fastify, req.session.userID, null);
+    await ensureUserDbStructure(fastify, req.session.userId, null);
     const database = getUserDb(fastify, req);
         const INTERVAL = 86400;
     const attacksCollection = database.collection('attacks');

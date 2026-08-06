@@ -41,7 +41,6 @@
             }).then(response => response.json())
               .then(data => {
                   if (data.success) {
-                      localStorage.setItem('jwt', data.token);
                       window.location.href = '/';
                   } else {
                       alert('Login failed: ' + data.message);

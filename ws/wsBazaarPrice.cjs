@@ -6,7 +6,7 @@ const API_BASE = process.env.TORN_API_URL;
 const REFRESH_MS = Number(process.env.REFRESH_MS || 30000);
 const SAFE_RPM = Math.min(Number(process.env.SAFE_RPM || 55), 59);
 const API_KEY = process.env.TORN_API_KEY;
-if (!API_KEY) throw new Error('Missing TORN_API_KEY in .env');
+const { authorizeSocket } = require('../routes/wsHandler.cjs');
 
 const dynamicWatchSet = new Set();
 
@@ -316,8 +316,10 @@ async function plugin(fastify, opts) {
     return; // on ne lance pas la suite
   }
 
-  fastify.get('/wsb', { websocket: true }, (conn, req) => {
+  fastify.get('/wsb', { websocket: true }, async (conn, req) => {
     const ws = conn.socket || conn;
+    if (!await authorizeSocket(fastify, ws, req)) return;
+    fastify.authSessions.registerSocket?.(req, ws);
     ws.isBazaar = true;
     // Stocker req pour accéder à la session (clé API utilisateur)
   // plus besoin de stocker la requête pour la clé API (clé globale utilisée)
@@ -340,7 +342,8 @@ async function plugin(fastify, opts) {
       } else clearInterval(pingInt);
     }, PING_INTERVAL);
 
-    ws.on('message', raw => {
+    ws.on('message', async raw => {
+      if (!await authorizeSocket(fastify, ws, req)) return;
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
       if (!msg || typeof msg !== 'object') return;
@@ -366,6 +369,12 @@ async function plugin(fastify, opts) {
   ws.on('close', () => clearInterval(pingInt));
     ws.on('error', err => fastify.log.error('[wsBazaarPrice] socket error '+err.message));
   });
+
+  // A missing key must never turn a test/startup into an external request.
+  if (!API_KEY) {
+    fastify.log.warn({ event: 'bazaar_refresh_disabled' }, 'bazaar refresh is disabled without an API key');
+    return;
+  }
 
   // Lancement asynchrone pour ne pas bloquer le démarrage fastify
   let interval; // sera assigné après première exécution

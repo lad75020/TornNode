@@ -20,9 +20,8 @@ export default function Login({ darkMode }) {
         body: JSON.stringify({ username, passkey })
       });
       const data = await res.json().catch(() => ({}));
-      if (data && data.success && data.token) {
-        try { localStorage.setItem('jwt', data.token); } catch(_) {}
-        // Reload to let Main reinitialize websockets and state
+      if (data && data.success) {
+        // The HttpOnly cookie is sent automatically; client code never reads it.
         window.location.href = '/';
       } else {
         setError(data && data.message ? data.message : 'Authentication failed');
@@ -48,29 +47,35 @@ export default function Login({ darkMode }) {
           </div>
           <form onSubmit={onSubmit}>
             <div className="mb-3">
-              <label className="form-label">Username</label>
+              <label className="form-label" htmlFor="login-username">Username</label>
               <input
                 type="text"
+                id="login-username"
                 className="form-control"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 autoComplete="username"
+                required
+                aria-describedby={error ? 'login-error' : undefined}
                 disabled={loading}
               />
             </div>
             <div className="mb-3">
-              <label className="form-label">Passkey</label>
+              <label className="form-label" htmlFor="login-passkey">Passkey</label>
               <input
                 type="password"
+                id="login-passkey"
                 className="form-control"
                 value={passkey}
                 onChange={e => setPasskey(e.target.value)}
                 autoComplete="current-password"
+                required
+                aria-describedby={error ? 'login-error' : undefined}
                 disabled={loading}
               />
             </div>
             {error && (
-              <div className="alert alert-danger py-2" role="alert" style={{ fontSize: 13 }}>
+              <div id="login-error" className="alert alert-danger py-2" role="alert" aria-live="polite" style={{ fontSize: 13 }}>
                 {error}
               </div>
             )}
@@ -82,64 +87,10 @@ export default function Login({ darkMode }) {
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
             </div>
+            {loading && <p className="mt-2 mb-0" role="status">Signing in, please wait…</p>}
           </form>
         </div>
       </div>
     </div>
-  );
-}
-
-function LoginForm({ onAuth }) {
-  const [username, setLogin] = useState('');
-  const [passkey, setPassword] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-  const res = await fetch('/authenticate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username, passkey})
-      });
-      if (!res.ok) throw new Error('Authentication failed');
-      const data = await res.json();
-      if (data.token) {
-        onAuth(data.token);
-      } else {
-        setError('Invalid credentials');
-      }
-    } catch (err) {
-      setError('Erreur d’authentification');
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} style={{ margin: 20 }}>
-      <div>
-        <input
-          type="text"
-          value={username}
-          onChange={e => setLogin(e.target.value)}
-          placeholder="Login"
-          style={{ padding: 8, width: 200, marginBottom: 8 }}
-        />
-      </div>
-      <div>
-        <input
-          type="password"
-          value={passkey}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="Mot de passe"
-          style={{ padding: 8, width: 200, marginBottom: 8 }}
-        />
-      </div>
-      <div style={{ width: '100%' }}>
-        <button type="submit" className="btn btn-primary mb-4">Se&nbsp;connecter</button>
-      </div>
-      {error && <div style={{ color: 'red', marginTop: 8 }}>{error}</div>}
-    </form>
   );
 }

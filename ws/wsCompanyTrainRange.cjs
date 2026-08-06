@@ -7,7 +7,7 @@ module.exports = async function wsCompanyTrainRange(socket, req, fastify, payloa
     return;
   }
   try {
-  const database = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db(req.session.userID.toString()) : fastify.mongo.client.db(req.session.userID.toString()));
+  const database = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db(req.session.userId.toString()) : fastify.mongo.client.db(req.session.userId.toString()));
     const logsCollection = database.collection('logs');
     const statsCollection = database.collection('Stats');
     const normDay = (val) => {

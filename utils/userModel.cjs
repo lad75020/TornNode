@@ -26,10 +26,23 @@ const User = mongoose.models.User || mongoose.model('User', userSchema);
 
 let connectPromise = null;
 
+function getSessionsUri(baseUri) {
+  const raw = String(baseUri || '').trim();
+  if (!raw) return raw;
+
+  const parsed = new URL(raw);
+  const pathname = parsed.pathname.replace(/\/$/, '');
+  if (!pathname || pathname === '/') {
+    parsed.pathname = '/sessions';
+  } else if (pathname !== '/sessions') {
+    parsed.pathname = `${pathname}/sessions`;
+  }
+
+  return parsed.toString();
+}
+
 async function connectSessionsDb(baseUri) {
-  const sessionsUri = String(baseUri || '').endsWith('/sessions')
-    ? String(baseUri)
-    : `${baseUri}/sessions`;
+  const sessionsUri = getSessionsUri(baseUri);
 
   if (mongoose.connection.readyState === 1 && mongoose.connection.name === 'sessions') {
     return mongoose.connection;

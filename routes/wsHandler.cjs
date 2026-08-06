@@ -27,7 +27,15 @@ async function authorizeSocket(fastify, socket, request, { checkSession = false 
 module.exports = (fastify, isTest) => {
     fastify.register(async function (fastify) {
     fastify.get('/ws', {
+       
         websocket: true,
+        config: {
+            rateLimit: {
+                max: 60,
+                timeWindow: '1 minute'
+            }
+        }
+   ,
         config: {
             rateLimit: {
                 max: 60,

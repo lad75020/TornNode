@@ -62,6 +62,8 @@ const AccessKeyManager = lazy(() => import('./AccessKeyManager.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
 const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
 const Museum = lazy(() => import('./Museum.jsx'));
+const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
+const Museum = lazy(() => import('./Museum.jsx'));
 
 // Ensure IndexedDB database "LogsDB" exists with store "logs" (keyPath "_id")
 // and indexes "log" and "timestamp". If it already exists, do nothing.
@@ -228,9 +230,14 @@ const chartComponents = [
 
 function Main() {
   const location = useLocation();
-  // Authentication evidence remains the HttpOnly cookie; the client keeps no token.
-  const [authenticated, setAuthenticated] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
+  const isMemoryPage = location.pathname.startsWith('/memory');
+  const isWsTornTestPage = location.pathname.startsWith('/ws-torn-test');
+  const isMuseumPage = location.pathname.startsWith('/museum');
+  // Track auth token in state so UI reacts immediately on logout/login
+  const [token, setToken] = useState(() => {
+    try { return localStorage.getItem('jwt'); } catch { return null; }
+  });
+  // Keep token in sync if another tab changes it
   useEffect(() => {
     let active = true;
     fetch('/session', { credentials: 'include' })
@@ -778,6 +785,22 @@ function Main() {
             >
               Access Keys
             </button>
+            <Link
+              to="/ws-torn-test"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="wsTorn dry-run tester"
+            >
+              wsTorn Test
+            </Link>
+            <Link
+              to="/museum"
+              className="btn btn-sm btn-outline-secondary"
+              style={{ fontSize: 10 }}
+              title="Museum point price"
+            >
+              Museum
+            </Link>
           </div>
         </div>
       {/* Tableau bazaar réutilisable (lazy) */}
@@ -799,6 +822,14 @@ function Main() {
         />
       </Suspense>
     <Routes>
+      <Route
+        path="/ws-torn-test"
+        element={(
+          <Suspense fallback={<div style={{ padding: 20 }}>Chargement mémoire…</div>}>
+            <MemoryGraphExplorer darkMode={darkMode} />
+          </Suspense>
+        )}
+      />
       <Route
         path="/ws-torn-test"
         element={(
@@ -828,7 +859,7 @@ function Main() {
       <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
       <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
     </Routes>
-  {!isMemoryPage && !isWsTornTestPage && !isMuseumPage && (
+  {!isMemoryPage && (
     <>
       {/* Séparateur entre le slider et les boutons du bas pour éviter chevauchements */}
       <hr className="my-2" style={{ borderColor: darkMode ? '#555' : '#ddd' }} />

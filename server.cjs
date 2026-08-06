@@ -1,4 +1,5 @@
-require('dotenv').config({ override: !process.argv.includes('--test') });
+require('@dotenvx/dotenvx').config();
+
 const path = require('path');
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
@@ -189,7 +190,7 @@ const bodyParser = require('@fastify/formbody');
 const fastifyCompress = require('@fastify/compress');
 const fastifyWebsocket = require('@fastify/websocket');
 const fastifyRateLimit = require('@fastify/rate-limit');
-const fastifyJwt = require('@fastify/jwt');
+
 const dailyPriceAverager = require('./dailyPriceAverager.cjs');
 const fastifyRedis = require('@fastify/redis');
 
@@ -202,9 +203,7 @@ fastify.register(bodyParser);
 fastify.register(fastifyRateLimit, {
     global: false
 });
-fastify.register(fastifyJwt, {
-    secret: process.env.JWT_SECRET
-});
+
 // Cookies & session AVANT la protection et les fichiers statiques pour que req.session soit disponible
 fastify.register(fastifyCookie);
 
@@ -256,8 +255,15 @@ fastify.after(() => {
             ? [path.join(__dirname, 'client', 'dist'), path.join(__dirname, 'public')]
             : path.join(__dirname, 'public'),
         prefix: '/',
-        setHeaders: (res) => {
-            res.setHeader('Cache-Control', 'public, max-age=31536000');
+        setHeaders: (reply, filePath) => {
+            // Keep the HTML entry point fresh so it never references a previous
+            // build's content-hashed assets; Vite assets themselves stay immutable.
+            reply.header(
+                'Cache-Control',
+                filePath.endsWith('index.html')
+                    ? 'no-store, private, max-age=0'
+                    : 'public, max-age=31536000, immutable'
+            );
         }
     });
     fastify.register(fastifyFavicon, {
@@ -285,38 +291,6 @@ fastify.register(require('@fastify/mongodb'), {
         //require('./routes/Utils.cjs')(fastify, isTest, chartType);
         require('./routes/wsHandler.cjs')(fastify, isTest);
    });    
-    // Register routes après session pour garantir req.session
-    fastify.register(async function registerViteAndRoot(instance) {
-        if (!isTest) {
-            const fastifyVite = require('@fastify/vite');
-            try {
-                await instance.register(fastifyVite, {
-                    root: 'client',
-                    // Resolve the Vite Fastify cache relative to the Vite root:
-                    // client/dist/vite.config.json.
-                    distDir: 'dist',
-                    dev: false,
-                    spa: true
-                });
-                await instance.vite.ready();
-            } catch (e) {
-                try { instance.log.error('[vite] init failed '+e.message); } catch {}
-                throw e;
-            }
-        }
-
-        // Root route: serve SPA if authenticated, otherwise serve static login page
-        instance.get('/', (req, reply) => {
-            try {
-
-                    return isTest ? reply.sendFile('index.html') : reply.html();
-  
-            } catch (e) {
-                try { fastify.log && fastify.log.error('[root] handler error: ' + e.message); } catch {}
-                return reply.code(500).send('Internal Server Error');
-            }
-        });
-    });
     // Warmup amélioré (instrumentation + validation)
 
 // Encapsulation de l'initialisation asynchrone (évite top-level await en CJS)

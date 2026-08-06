@@ -14,6 +14,7 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Link,
   useNavigate,
   useParams,
   useLocation
@@ -60,8 +61,6 @@ const PokerBetWinGraph = lazy(() => import('./PokerBetWinGraph.jsx'));
 const Login = lazy(() => import('./Login.jsx'));
 const AccessKeyManager = lazy(() => import('./AccessKeyManager.jsx'));
 const PublicBazaarPage = lazy(() => import('./PublicBazaarPage.jsx'));
-const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
-const Museum = lazy(() => import('./Museum.jsx'));
 const WsTornTestPage = lazy(() => import('./WsTornTestPage.jsx'));
 const Museum = lazy(() => import('./Museum.jsx'));
 
@@ -233,11 +232,10 @@ function Main() {
   const isMemoryPage = location.pathname.startsWith('/memory');
   const isWsTornTestPage = location.pathname.startsWith('/ws-torn-test');
   const isMuseumPage = location.pathname.startsWith('/museum');
-  // Track auth token in state so UI reacts immediately on logout/login
-  const [token, setToken] = useState(() => {
-    try { return localStorage.getItem('jwt'); } catch { return null; }
-  });
-  // Keep token in sync if another tab changes it
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  // The browser session cookie is authoritative; the token is only a UI
+  // sentinel for components that require an authenticated session.
   useEffect(() => {
     let active = true;
     fetch('/session', { credentials: 'include' })
@@ -825,14 +823,6 @@ function Main() {
       <Route
         path="/ws-torn-test"
         element={(
-          <Suspense fallback={<div style={{ padding: 20 }}>Chargement mémoire…</div>}>
-            <MemoryGraphExplorer darkMode={darkMode} />
-          </Suspense>
-        )}
-      />
-      <Route
-        path="/ws-torn-test"
-        element={(
           <Suspense fallback={<div style={{ padding: 20 }}>Loading wsTorn test...</div>}>
             <WsTornTestPage
               wsStatus={wsMain.status}
@@ -1062,6 +1052,8 @@ function Main() {
   {/* Toasts montés via portail, isolés des re-renders coûteux */}
   <ToastHost />
   {/* Audio supprimé */}
+    </>
+  )}
       </div>
     </div>
   );

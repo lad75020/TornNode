@@ -14,9 +14,10 @@ export default function Login({ darkMode }) {
   const [error, setError] = useState('');
   const accessKeySupport = getAccessKeySupport();
 
-  const finishLogin = (token) => {
-    try { localStorage.setItem('jwt', token); } catch (_) {}
-    window.location.href = '/';
+  const finishLogin = () => {
+    // The HttpOnly server session cookie is authoritative; do not retain a
+    // browser-readable bearer token.
+    window.location.assign('/');
   };
 
   const onSubmit = async (event) => {
@@ -35,8 +36,8 @@ export default function Login({ darkMode }) {
         body: JSON.stringify({ username, passkey })
       });
       const data = await res.json().catch(() => ({}));
-      if (data?.success && data?.token) {
-        finishLogin(data.token);
+      if (data?.success) {
+        finishLogin();
       } else {
         setError(data?.message || 'Authentication failed');
       }
@@ -52,8 +53,8 @@ export default function Login({ darkMode }) {
     setAccessKeyLoading(true);
     try {
       const data = await loginWithAccessKey();
-      if (data?.token) {
-        finishLogin(data.token);
+      if (data?.success) {
+        finishLogin();
       } else {
         setError('Access key login failed');
       }

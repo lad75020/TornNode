@@ -28,3 +28,4 @@ tornnode.code-workspace
 scripts/fetchClothingItems.js
 package-lock.json
 /.specify
+.env.keys

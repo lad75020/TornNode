@@ -67,6 +67,9 @@ function createSessionService({ redis, users, now = () => Date.now(), cookieSecu
     await callSessionMethod(request.session, 'regenerate');
     Object.assign(request.session, {
       userId: user.id,
+      // Legacy routes use userID; retain the alias while server-side session
+      // validation uses the canonical userId field.
+      userID: user.id,
       username: user.username,
       userType: user.type,
       TornAPIKey: user.TornAPIKey,

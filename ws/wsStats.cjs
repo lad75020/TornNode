@@ -37,7 +37,7 @@ module.exports = async function wsStats(socket, req, fastify, options = {}) {
         }
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-    await ensureUserDbStructure(fastify, req.session.userID, fastify?.log || null);
+    await ensureUserDbStructure(fastify, req.session.userId, fastify?.log || null);
     const db = getUserDb(fastify, req);
         const collection = db.collection('Stats');
 

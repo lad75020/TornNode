@@ -79,7 +79,7 @@ try {
 
     const getUserDb = require('../utils/getUserDb.cjs');
     const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-    await ensureUserDbStructure(fastify, req.session.userID, fastify && fastify.log);
+    await ensureUserDbStructure(fastify, req.session.userId, fastify && fastify.log);
     const database = getUserDb(fastify, req);
         // S'assurer des collections clés (créées sur demande par Mongo sinon).
         const logsCollection = database.collection('logs');

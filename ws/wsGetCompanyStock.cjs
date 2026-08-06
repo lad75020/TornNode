@@ -5,7 +5,7 @@ module.exports = async function wsGetCompanyStock(socket, req, fastify, parsed) 
     return;
   }
   try {
-    const database = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db(req.session.userID.toString()) : fastify.mongo.client.db(req.session.userID.toString()));
+    const database = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db(req.session.userId.toString()) : fastify.mongo.client.db(req.session.userId.toString()));
     const col = database.collection('CompanyStock');
     // Dernier snapshot (tri par timestamp desc)
     const doc = await col.find({}, { projection: { _id:0 } }).sort({ timestamp:-1 }).limit(1).next();

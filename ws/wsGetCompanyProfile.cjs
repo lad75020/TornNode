@@ -5,7 +5,7 @@ module.exports = async function wsGetCompanyProfile(socket, req, fastify) {
     return;
   }
   try {
-    const database = fastify.mongo.client.db(req.session.userID.toString());
+    const database = fastify.mongo.client.db(req.session.userId.toString());
     const col = database.collection('CompanyProfile');
     const doc = await col.find({}, { projection: { _id:0 } }).sort({ timestamp:-1 }).limit(1).next();
     if (!doc || !doc.company) {

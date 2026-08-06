@@ -22,23 +22,14 @@ paths:
     get:
       summary: Main WebSocket endpoint
       description: |
-        WebSocket endpoint for authenticated app operations. JWT token is
-        accepted via query parameter. Session cookie provides TornAPIKey and
-        userID for most operations.
-      parameters:
-        - name: token
-          in: query
-          required: true
-          description: JWT used by verifyClient; connection is not rejected if invalid.
-          schema:
-            type: string
+        WebSocket endpoint for authenticated app operations. The browser sends
+        its signed HttpOnly session cookie during a same-origin upgrade.
       responses:
         "101":
           description: WebSocket upgrade
       x-websocket: true
       x-auth:
-        jwtQueryParam: token
-        sessionCookie: true
+        sessionCookie: sid
       x-keepalive:
         pingIntervalMsEnv: WS_PING_INTERVAL_MS
         pongTimeoutMsEnv: WS_PONG_TIMEOUT_MS

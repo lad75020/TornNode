@@ -6,7 +6,7 @@ module.exports = async function wsRacingSkill(socket, req, fastify){
     let coll;
     try {
   const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-  await ensureUserDbStructure(fastify, req.session.userID, fastify?.log);
+  await ensureUserDbStructure(fastify, req.session.userId, fastify?.log);
   const db = getUserDb(fastify, req);
       coll = db.collection('Stats');
     } catch (e) {

@@ -8,7 +8,7 @@ module.exports = async function wsGetCompanyProfileHistory(socket, req, fastify,
     return;
   }
   try {
-    const database = fastify.mongo.client.db(req.session.userID.toString());
+    const database = fastify.mongo.client.db(req.session.userId.toString());
     const col = database.collection('CompanyProfile');
     // Filtrage optionnel par plage de dates
     const from = parsed && Number(parsed.from);

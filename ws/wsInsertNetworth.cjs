@@ -24,7 +24,7 @@ module.exports = async function (req, fastify, socket) {
         let database;
         try {
             const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-            await ensureUserDbStructure(fastify, req.session.userID, null);
+            await ensureUserDbStructure(fastify, req.session.userId, null);
             database = getUserDb(fastify, req);
         }
         catch(e){

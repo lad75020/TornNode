@@ -1,8 +1,3 @@
-module.exports = async function ( socket, req) {
-    const response = { session_active: true };
-
-        if (!req.session.TornAPIKey )
-            response.session_active = false;
-
-        socket.send(JSON.stringify(response));
-}
+module.exports = async function (socket, req) {
+    socket.send(JSON.stringify({ session_active: Boolean(req.session && req.session.userId) }));
+};

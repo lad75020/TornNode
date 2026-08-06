@@ -1,12 +1,11 @@
-require('dotenv').config({override:true});
+require('dotenv').config({ override: !process.argv.includes('--test') });
 const path = require('path');
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
-const crypto = require('crypto');
 const socketEvents = require('./socketEvents.cjs');
 const RedisStore = require('connect-redis').RedisStore;
-const jwt = require('jsonwebtoken');
+const { createSessionService, SESSION_COOKIE_NAME } = require('./routes/authSession.cjs');
 
 const argv = yargs(hideBin(process.argv))
     .option('port', {
@@ -43,16 +42,20 @@ const https = argv.https;
 const log = true;//argv.log || false;
 // Mode single-thread: suppression de cluster/multithreading
 const isTest = argv.test || false;
-const MONGO_URI = isTest ? process.env.MONGODB_URI_TEST : process.env.MONGODB_URI;
+function isolatedUrl(value, fallback, protocol) {
+    if (!value) return fallback;
+    try {
+        const url = new URL(value.includes('://') ? value : `${protocol}://${value}`);
+        return ['127.0.0.1', 'localhost', '::1'].includes(url.hostname) ? url.href.replace(/\/$/, '') : fallback;
+    } catch { return fallback; }
+}
+const MONGO_URI = isTest
+    ? isolatedUrl(process.env.MONGODB_URI_TEST, 'mongodb://127.0.0.1:27018/tornnode_auth_test', 'mongodb')
+    : process.env.MONGODB_URI;
 // Configure Redis via @fastify/redis
 let redisUrl;
 if (isTest) {
-    const host = process.env.REDIS_URL_TEST || '127.0.0.1';
-    const port = process.env.REDIS_TEST_PORT || 18422;
-    const username = process.env.REDIS_TEST_USERNAME || 'default';
-    const password = process.env.REDIS_TEST_PASSWORD || '';
-    const cred = `${encodeURIComponent(username)}:${encodeURIComponent(password)}`;
-    redisUrl = `redis://${cred}@${host}:${port}`;
+    redisUrl = isolatedUrl(process.env.REDIS_URL_TEST, `redis://127.0.0.1:${process.env.REDIS_TEST_PORT || 18422}`, 'redis');
 } else {
     redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 }
@@ -168,9 +171,12 @@ function startUserImportScheduler() {
     try { log.info('[scheduler] user import warmup scheduled'); } catch {}
 }
 
+const trustedProxy = process.env.TRUSTED_PROXY === 'true';
 const fastify = require('fastify')({
-    logger: log ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/home/laurent/tornnode/rpi52.log', base: { service: 'tonstatsdubbo' } } : false,
-    trustProxy: true
+    logger: log ? (isTest
+        ? { level: process.env.FASTIFY_LOG_LEVEL || 'info', base: { service: 'tonstatsdubbo-test' } }
+        : { level: process.env.FASTIFY_LOG_LEVEL || 'info', file: '/Users/laurent/RPI5/rpi52.log', base: { service: 'tonstatsdubbo' } }) : false,
+    trustProxy: trustedProxy
 });
 
 
@@ -188,7 +194,7 @@ const dailyPriceAverager = require('./dailyPriceAverager.cjs');
 const fastifyRedis = require('@fastify/redis');
 
 fastify.register(fastifyCors, {
-    origin: true,
+    origin: process.env.CORS_ORIGIN || false,
     credentials: true
 });
 fastify.register(fastifyCompress);
@@ -202,21 +208,11 @@ fastify.register(fastifyJwt, {
 // Cookies & session AVANT la protection et les fichiers statiques pour que req.session soit disponible
 fastify.register(fastifyCookie);
 
-// Generate a 32-byte random secret for fastify-session crypto
-const sessionCrypto = {
-    sign: {
-        key: crypto.randomBytes(32)
-    },
-    verify: {
-        key: crypto.randomBytes(32)
-    },
-    encrypt: {
-        key: crypto.randomBytes(32)
-    },
-    decrypt: {
-        key: crypto.randomBytes(32)
-    }
-};
+const sessionSecret = process.env.SESSION_SECRET || (isTest ? 'test-only-session-secret-must-be-at-least-32-characters' : null);
+if (!sessionSecret || sessionSecret.length < 32) throw new Error('SESSION_SECRET must be set to at least 32 characters');
+const cooldownDigestSecret = process.env.AUTH_COOLDOWN_DIGEST_SECRET || (isTest ? 'test-only-cooldown-digest-secret' : null);
+if (!cooldownDigestSecret || cooldownDigestSecret.length < 16) throw new Error('AUTH_COOLDOWN_DIGEST_SECRET must be set');
+fastify.decorate('authCooldownDigestSecret', cooldownDigestSecret);
 
 // Register a node-redis v4 client into @fastify/redis, then session with that client
 // Root-level Redis client and plugins to expose fastify.redis globally
@@ -228,12 +224,19 @@ redisClient.on('ready', () => { try { fastify.log.info('[redis] ready'); } catch
 redisClient.connect().catch((e) => { try { fastify.log.error(`[redis] connect error: ${e.message}`); } catch {} });
 fastify.register(fastifyRedis, { client: redisClient });
 fastify.register(fastifySession, {
-    secret: process.env.SESSION_SECRET,
+    secret: sessionSecret,
     store: new RedisStore({ client: redisClient }),
-    cookie: { secure: https, httpOnly: true, sameSite: 'none' },
-    rolling: true,
-    crypto: sessionCrypto
+    cookieName: SESSION_COOKIE_NAME,
+    cookie: { secure: isTest ? process.env.AUTH_TEST_COOKIE_SECURE === 'true' : true, httpOnly: true, sameSite: 'lax', path: '/' },
+    rolling: false,
+    saveUninitialized: false
 });
+fastify.decorate('authSessions', createSessionService({
+    redis: redisClient,
+    users: () => { const db = fastify.mongo?.db || fastify.mongo?.client?.db('sessions'); return db?.collection('users'); },
+    cookieSecure: isTest ? process.env.AUTH_TEST_COOKIE_SECURE === 'true' : true,
+    logger: fastify.log
+}));
 fastify.addHook('onClose', async (_i, done) => {
     try { await redisClient.quit(); } catch {} finally { done(); }
 });
@@ -244,10 +247,14 @@ fastify.addHook('onClose', async (_i, done) => {
 // Les plugins dépendant de la session doivent être enregistrés après fastify-session
 fastify.after(() => {
     // Protection des routes SPA et index (requiert req.session)
-    fastify.register(require('./routes/protectIndex.cjs'));
+    // Register at the root scope so the /index.html request hook also guards
+    // the static route that @fastify/vite registers in its child scope.
+    require('./routes/protectIndex.cjs')(fastify);
     // Fichiers statiques APRÈS la protection
     fastify.register(fastifyStatic, {
-        root: path.join(__dirname, 'public'),
+        root: isTest
+            ? [path.join(__dirname, 'client', 'dist'), path.join(__dirname, 'public')]
+            : path.join(__dirname, 'public'),
         prefix: '/',
         setHeaders: (res) => {
             res.setHeader('Cache-Control', 'public, max-age=31536000');
@@ -259,36 +266,8 @@ fastify.after(() => {
 });
 
 // fastify.redis is provided by @fastify/redis
-// Register WebSocket with JWT auth
 fastify.register(fastifyWebsocket, {
-    options: { maxPayload: 10485760 },
-    verifyClient: (info, done) => {
-        // Extract token from query string
-        try {
-            const url = require('url');
-            const query = url.parse(info.req.url, true).query;
-            const token = query.token;
-            if (!token) {
-                info.req.user = null;
-                info.req.authError = 'Missing JWT';
-                return done(true);
-            }
-            jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-                if (err) {
-                    info.req.user = null;
-                    info.req.authError = 'Invalid JWT';
-                    return done(true);
-                }
-                info.req.user = decoded;
-                return done(true);
-            });
-        } catch (e) {
-            try { fastify.log && fastify.log.warn('[ws] verifyClient error: '+e.message); } catch {}
-            info.req.user = null;
-            info.req.authError = 'verifyClient exception';
-            return done(true);
-        }
-    }
+    options: { maxPayload: 10485760 }
 });
 
 // Register Mongo plugin then continue setup
@@ -307,6 +286,37 @@ fastify.register(require('@fastify/mongodb'), {
         require('./routes/wsHandler.cjs')(fastify, isTest);
    });    
     // Register routes après session pour garantir req.session
+    fastify.register(async function registerViteAndRoot(instance) {
+        if (!isTest) {
+            const fastifyVite = require('@fastify/vite');
+            try {
+                await instance.register(fastifyVite, {
+                    root: 'client',
+                    // Resolve the Vite Fastify cache relative to the Vite root:
+                    // client/dist/vite.config.json.
+                    distDir: 'dist',
+                    dev: false,
+                    spa: true
+                });
+                await instance.vite.ready();
+            } catch (e) {
+                try { instance.log.error('[vite] init failed '+e.message); } catch {}
+                throw e;
+            }
+        }
+
+        // Root route: serve SPA if authenticated, otherwise serve static login page
+        instance.get('/', (req, reply) => {
+            try {
+
+                    return isTest ? reply.sendFile('index.html') : reply.html();
+  
+            } catch (e) {
+                try { fastify.log && fastify.log.error('[root] handler error: ' + e.message); } catch {}
+                return reply.code(500).send('Internal Server Error');
+            }
+        });
+    });
     // Warmup amélioré (instrumentation + validation)
 
 // Encapsulation de l'initialisation asynchrone (évite top-level await en CJS)

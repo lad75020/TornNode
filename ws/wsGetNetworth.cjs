@@ -8,7 +8,7 @@ module.exports = async function wsGetNetworth(socket, req, fastify) {
     }
   const getUserDb = require('../utils/getUserDb.cjs');
   const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-  await ensureUserDbStructure(fastify, req.session.userID, fastify?.log);
+  await ensureUserDbStructure(fastify, req.session.userId, fastify?.log);
   const database = getUserDb(fastify, req);
     const networthCollection = database.collection('Networth');
     const options = { projection: { _id: 0 } };

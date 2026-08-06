@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 export default function useAppWebSocket(
   path,
-  token,
+  enabled,
+  onUnauthorized,
   { heartbeatMs = 25000, reconnectMs = 1000, maxMessages = 800 } = {}
 ) {
   const wsRef = useRef(null);
@@ -10,7 +11,7 @@ export default function useAppWebSocket(
   const [status, setStatus] = useState('closed');
 
   useEffect(() => {
-    if (!token) {
+    if (!enabled) {
       if (wsRef.current) {
         try { wsRef.current.close(); } catch {}
         wsRef.current = null;
@@ -32,7 +33,7 @@ export default function useAppWebSocket(
 
     function open() {
       const base = resolveWsBase();
-      const url = `${base}${path}?token=${encodeURIComponent(token)}`;
+      const url = `${base}${path}`;
       try { wsRef.current = new WebSocket(url); } catch { schedule(); return; }
       wsRef.current.onopen = () => {
         setStatus('open');
@@ -44,15 +45,6 @@ export default function useAppWebSocket(
       };
       wsRef.current.onmessage = (ev) => {
         if (ev.data === 'pong') return;
-        // Capture userID session message et stocker
-        try {
-          if (typeof ev.data === 'string' && ev.data.startsWith('{')) {
-            const parsed = JSON.parse(ev.data);
-            if (parsed && parsed.type === 'session' && parsed.userID) {
-              try { if (!localStorage.getItem('userID')) localStorage.setItem('userID', String(parsed.userID)); } catch {}
-            }
-          }
-        } catch {}
         setMessages(prev => {
           const max = Number(maxMessages) > 0 ? Number(maxMessages) : 800;
           let base = prev;
@@ -60,14 +52,18 @@ export default function useAppWebSocket(
           return [...base, ev.data];
         });
       };
-      wsRef.current.onclose = () => { cleanup(); if (shouldReconnect) schedule(); };
+      wsRef.current.onclose = (event) => {
+        cleanup();
+        if (event.code === 4401) { shouldReconnect = false; onUnauthorized?.(); return; }
+        if (shouldReconnect) schedule();
+      };
       wsRef.current.onerror = () => { try { wsRef.current.close(); } catch {}; };
     }
     function schedule() { setTimeout(() => { if (shouldReconnect) open(); }, reconnectMs); }
     function cleanup() { setStatus('closed'); if (pingTimer) clearInterval(pingTimer); }
     open();
     return () => { shouldReconnect = false; cleanup(); try { wsRef.current?.close(); } catch {}; wsRef.current = null; };
-  }, [path, token, heartbeatMs, reconnectMs]);
+  }, [path, enabled, onUnauthorized, heartbeatMs, reconnectMs]);
 
   const send = useCallback((msg) => { try { if (wsRef.current?.readyState === 1) wsRef.current.send(msg); } catch {} }, []);
   return { wsRef, messages, status, send, setMessages };

@@ -78,29 +78,35 @@ export default function Login({ darkMode }) {
           </div>
           <form onSubmit={onSubmit}>
             <div className="mb-3">
-              <label className="form-label">Username</label>
+              <label className="form-label" htmlFor="login-username">Username</label>
               <input
                 type="text"
+                id="login-username"
                 className="form-control"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
                 autoComplete="username"
+                required
+                aria-describedby={error ? 'login-error' : undefined}
                 disabled={loading || accessKeyLoading}
               />
             </div>
             <div className="mb-3">
-              <label className="form-label">Password</label>
+              <label className="form-label" htmlFor="login-passkey">Password</label>
               <input
                 type="password"
+                id="login-passkey"
                 className="form-control"
                 value={passkey}
                 onChange={(event) => setPasskey(event.target.value)}
                 autoComplete="current-password"
+                required
+                aria-describedby={error ? 'login-error' : undefined}
                 disabled={loading || accessKeyLoading}
               />
             </div>
             {error && (
-              <div className="alert alert-danger py-2" role="alert" style={{ fontSize: 13 }}>
+              <div id="login-error" className="alert alert-danger py-2" role="alert" aria-live="polite" style={{ fontSize: 13 }}>
                 {error}
               </div>
             )}
@@ -122,6 +128,7 @@ export default function Login({ darkMode }) {
                 </button>
               </div>
             </div>
+            {loading && <p className="mt-2 mb-0" role="status">Signing in, please wait…</p>}
           </form>
           <p style={{ marginTop: 14, marginBottom: 0, fontSize: 13, opacity: 0.75 }}>
             Add access keys after signing in once with your password.

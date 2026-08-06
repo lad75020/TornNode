@@ -1,64 +1,33 @@
-/* eslint-disable no-empty */
-module.exports = async function (fastify) {
-  function isAuthed(req) {
-    if (req.session && req.session.TornAPIKey) return true;
-    const auth = req.headers.authorization;
-    if (auth && auth.startsWith('Bearer ')) {
-      try {
-        fastify.jwt.verify(auth.slice(7));
-        return true;
-      } catch {}
-    }
-    return false;
-  }
+'use strict';
 
-  // Public SPA route: allow public-bazaar without auth, serve SPA index
-  fastify.get('/public-bazaar', {}, (req, reply) => {
-    reply
-      .header('Cache-Control', 'no-store, private, max-age=0')
-      .header('Pragma', 'no-cache')
-      .header('Expires', '0')
-      .sendFile('index.html');
+function noStore(reply) {
+  return reply.header('Cache-Control', 'no-store, private, max-age=0').header('Pragma', 'no-cache').header('Expires', '0');
+}
+
+function guard({ authSessions }) {
+  return async (request, reply) => {
+    let result;
+    try { result = await authSessions.validateAndRenew(request); } catch (_) { result = { ok: false }; }
+    if (result.ok) return;
+    return noStore(reply).code(302).header('Location', '/').send();
+  };
+}
+
+module.exports = async function protectIndex(fastify) {
+  const protectedGuard = guard(fastify);
+  fastify.get('/public-bazaar', (request, reply) => noStore(reply).sendFile('index.html'));
+
+  // @fastify/vite registers its built index.html as a static route in production.
+  // Guard it at request time instead of declaring a competing /index.html route.
+  fastify.addHook('onRequest', async (request, reply) => {
+    const pathname = new URL(request.raw.url, 'http://localhost').pathname;
+    if (pathname === '/index.html') return protectedGuard(request, reply);
   });
 
-  // Route protégée explicite
-  fastify.get('/index.html', {
-    preHandler: (req, reply, done) => {
-      if (!isAuthed(req)) {
-        return reply.code(302)
-          .header('Cache-Control', 'no-store, private, max-age=0')
-          .header('Pragma', 'no-cache')
-          .header('Expires', '0')
-          .header('Location', '/')
-          .send();
-      }
-      done();
-    }
-  }, (req, reply) => {
-    reply
-      .header('Cache-Control', 'no-store, private, max-age=0')
-      .header('Pragma', 'no-cache')
-      .header('Expires', '0')
-      .sendFile('index.html');
-  });
-
-  // SPA routes (chart) protégées pareil
-  const spaPaths = ['/chart', '/chart/*', '/memory', '/memory/*', '/ws-torn-test', '/ws-torn-test/*'];
-  for (const p of spaPaths) {
-    fastify.get(p, {
-      preHandler: (req, reply, done) => {
-        if (!isAuthed(req)) {
-          return reply.code(302)
-            .header('Cache-Control', 'no-store, private, max-age=0')
-            .header('Location', '/')
-            .send();
-        }
-        done();
-      }
-    }, (req, reply) => {
-      reply
-        .header('Cache-Control', 'no-store, private, max-age=0')
-        .sendFile('index.html');
-    });
+  for (const path of ['/chart', '/chart/*', '/memory', '/memory/*', '/ws-torn-test', '/ws-torn-test/*']) {
+    fastify.get(path, { preHandler: protectedGuard }, (request, reply) => noStore(reply).sendFile('index.html'));
   }
 };
+
+module.exports.guard = guard;
+module.exports.noStore = noStore;

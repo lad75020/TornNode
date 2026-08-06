@@ -16,7 +16,7 @@ module.exports = async function wsGetCompanyDetailsHistory(socket, req, fastify,
     if (to < 10_000_000_000) to *= 1000;
     if (from > to) [from, to] = [to, from];
 
-    const db = fastify.mongo.client.db(req.session.userID.toString());
+    const db = fastify.mongo.client.db(req.session.userId.toString());
     const col = db.collection('CompanyDetails');
     const docs = await col.find({ timestamp: { $gte: from, $lte: to } }, { projection: { _id:0, timestamp:1, details:1 } })
       .sort({ timestamp:1 }).toArray();

@@ -66,8 +66,11 @@
   "type": "commonjs",
   "scripts": {
     "dev": "node server.cjs --no-test --log --host 127.0.0.1 --port 3104 --https",
+    "prestart": "npm run build",
     "start": "node server.cjs",
     "build:static": "vite build && rm -rf public/assets && cp -r client/dist/* public/",
+    "test:auth": "node --test tests/session-helper.test.cjs tests/session-rolling-expiry.test.cjs tests/authentication-login.test.cjs tests/authentication-denial.test.cjs tests/authentication-dependencies.test.cjs tests/authentication-cooldown.test.cjs tests/protected-routes.test.cjs tests/public-market-boundary.test.cjs tests/websocket-auth-upgrade.test.cjs tests/websocket-auth-commands.test.cjs tests/logout-http.test.cjs tests/websocket-logout.test.cjs tests/authentication-security.test.cjs",
+    "test:auth:browser": "EXPO_SKIP_SERVER=1 playwright test client/tests/authentication-sessions.spec.ts --config client/playwright.config.js",
     "memory:index": "MEMORY_MCP_DISABLE_LEGACY_PUSH=1 node scripts/buildMemoryIndex.js && node scripts/pushMemoryMcp.js",
     "memory:entities": "node scripts/generateAllEntitiesInput.js",
     "memory:read": "node scripts/readMemoryGraphs.js",

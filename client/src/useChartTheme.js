@@ -1,28 +1,32 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { applyCommonChartOptions, buildDataset, getChartColors } from './chartTheme.js';
 import { CHART_MARGINS } from './chartConstants.js';
 
-// Hook central pour générer couleurs, builder de datasets et options enrichies
+// Hook central pour générer couleurs, builder de datasets et options enrichies.
 export function useChartTheme(darkMode) {
-  const theme = useMemo(() => getChartColors(darkMode), [darkMode]);
-  function themedOptions(baseOptions) {
+  const theme = useMemo(() => getChartColors(Boolean(darkMode)), [darkMode]);
+
+  const themedOptions = useCallback((baseOptions = {}) => {
+    const baseLayout = baseOptions.layout || {};
     const merged = {
-      layout: {
-        ...(baseOptions?.layout || {}),
-        padding: baseOptions?.layout?.padding || {
-          top: CHART_MARGINS.top,
-            right: CHART_MARGINS.right,
-            bottom: CHART_MARGINS.bottom,
-            left: CHART_MARGINS.left,
-        }
-      },
       ...baseOptions,
+      layout: {
+        ...baseLayout,
+        padding: baseLayout.padding || {
+          top: CHART_MARGINS.top,
+          right: CHART_MARGINS.right,
+          bottom: CHART_MARGINS.bottom,
+          left: CHART_MARGINS.left
+        }
+      }
     };
-    return applyCommonChartOptions(merged, darkMode);
-  }
-  function ds(kind, index, data, overrides) {
-    return buildDataset(kind, index, data, darkMode, overrides);
-  }
+    return applyCommonChartOptions(merged, Boolean(darkMode));
+  }, [darkMode]);
+
+  const ds = useCallback((kind, index, data, overrides) => (
+    buildDataset(kind, index, data, Boolean(darkMode), overrides)
+  ), [darkMode]);
+
   return { theme, themedOptions, ds, CHART_MARGINS };
 }
 

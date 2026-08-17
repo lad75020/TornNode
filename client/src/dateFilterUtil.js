@@ -1,14 +1,59 @@
-// Utilitaire de filtrage des datasets par plage de dates (format YYYY-MM-DD uniquement)
+const DAILY_LABEL = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidDailyLabel(value) {
+  if (typeof value !== 'string' || !DAILY_LABEL.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isValidDateBoundary(value) {
+  return value == null || isValidDailyLabel(value);
+}
+
+function emptyDatasets(datasets) {
+  if (!Array.isArray(datasets)) return [];
+  return datasets.map(dataset => ({
+    ...(dataset && typeof dataset === 'object' ? dataset : {}),
+    data: []
+  }));
+}
+
+/**
+ * Filter aligned daily datasets without mutating caller-owned labels or data.
+ * Unsupported, malformed, or unsorted label formats are left untouched because
+ * slicing them by lexical position could present misleading analytics.
+ */
 export function filterDatasetsByDate(labels, datasets, dateFrom, dateTo) {
   if (!dateFrom && !dateTo) return { labels, datasets };
-  if (!labels || !labels.length) return { labels, datasets };
-  const isDaily = labels.every(l => /^\d{4}-\d{2}-\d{2}$/.test(l));
-  if (!isDaily) return { labels, datasets }; // ne tente pas de filtrer formats semaine/mois
-  let start = 0; let end = labels.length - 1;
-  if (dateFrom) { while (start < labels.length && labels[start] < dateFrom) start++; }
-  if (dateTo) { while (end >= 0 && labels[end] > dateTo) end--; }
-  if (end < start) return { labels: [], datasets: datasets.map(d => ({ ...d, data: [] })) };
-  const newLabels = labels.slice(start, end + 1);
-  const newDatasets = datasets.map(d => ({ ...d, data: d.data.slice(start, end + 1) }));
-  return { labels: newLabels, datasets: newDatasets };
+  if (!Array.isArray(labels) || labels.length === 0) return { labels, datasets };
+  if (!Array.isArray(datasets)) return { labels, datasets };
+  if (!labels.every(isValidDailyLabel)) return { labels, datasets };
+  if (labels.some((label, index) => index > 0 && label < labels[index - 1])) return { labels, datasets };
+
+  if (!isValidDateBoundary(dateFrom) || !isValidDateBoundary(dateTo)) {
+    return { labels: [], datasets: emptyDatasets(datasets) };
+  }
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    return { labels: [], datasets: emptyDatasets(datasets) };
+  }
+
+  let start = 0;
+  let end = labels.length - 1;
+  if (dateFrom) {
+    while (start < labels.length && labels[start] < dateFrom) start += 1;
+  }
+  if (dateTo) {
+    while (end >= 0 && labels[end] > dateTo) end -= 1;
+  }
+  if (end < start) return { labels: [], datasets: emptyDatasets(datasets) };
+
+  return {
+    labels: labels.slice(start, end + 1),
+    datasets: datasets.map(dataset => ({
+      ...(dataset && typeof dataset === 'object' ? dataset : {}),
+      data: Array.isArray(dataset?.data) ? dataset.data.slice(start, end + 1) : []
+    }))
+  };
 }
+
+export { isValidDailyLabel };

@@ -1,49 +1,54 @@
 import { createContext, useContext, useEffect, useState, useCallback, createElement, useRef } from 'react';
+import * as SunCalc from 'suncalc';
 import usePersistentState from './usePersistentState.js';
-// L'utilisateur installera suncalc : npm i suncalc
-// On importe dynamiquement pour réduire le risque si non encore installé
-let SunCalc = null;
-try { SunCalc = require('suncalc'); } catch(_) { /* sera chargé plus tard si dispo */ }
-
 const ThemeContext = createContext(null);
 
+function fallbackDarkMode(now = new Date()) {
+  const hour = now.getHours();
+  return !(hour >= 7 && hour < 19);
+}
+
+function validCoordinates(value) {
+  return value && Number.isFinite(value.lat) && Number.isFinite(value.lon);
+}
+
 export function ThemeProvider({ children }) {
-  const [userTheme, setUserTheme] = usePersistentState('themePreference', null); // null|"dark"|"light"
-  const [darkMode, setDarkMode] = useState(false);
-  const [coords, setCoords] = useState(null); // { lat, lon }
-  const timesRef = useRef({ dateKey: null, sunrise: null, sunset: null });
+  const [userTheme, setUserTheme] = usePersistentState('themePreference', null);
+  const [darkMode, setDarkMode] = useState(() => fallbackDarkMode());
+  const [coords, setCoords] = useState(null);
+  const timesRef = useRef({ coordinatesKey: null, dateKey: null, sunrise: null, sunset: null });
   const recomputeTimerRef = useRef(null);
 
-  // Calcul du mode auto selon sunrise/sunset si disponibles, sinon fallback heure fixe
   const computeAuto = useCallback(() => {
     const now = new Date();
-    const { sunrise, sunset, dateKey } = timesRef.current;
-    const currentDateKey = now.toISOString().slice(0,10);
-    // Recharger SunCalc si pas encore chargé
-    if (!SunCalc) {
-      try { SunCalc = require('suncalc'); } catch(_) {}
+    const currentDateKey = now.toISOString().slice(0, 10);
+    const coordinatesKey = validCoordinates(coords) ? `${coords.lat}:${coords.lon}` : 'fallback';
+    const previous = timesRef.current;
+
+    if (previous.coordinatesKey !== coordinatesKey) {
+      timesRef.current = { coordinatesKey, dateKey: null, sunrise: null, sunset: null };
     }
-    // Si on a des coordonnées et soit pas de times pour ce jour soit date différente -> recalcul
-    if (coords && SunCalc && dateKey !== currentDateKey) {
+
+    if (validCoordinates(coords) && SunCalc && timesRef.current.dateKey !== currentDateKey) {
       try {
-        const t = SunCalc.getTimes(now, coords.lat, coords.lon);
+        const times = SunCalc.getTimes(now, coords.lat, coords.lon);
         timesRef.current = {
+          coordinatesKey,
           dateKey: currentDateKey,
-            sunrise: t.sunrise || null,
-            sunset: t.sunset || null
+          sunrise: times.sunrise instanceof Date ? times.sunrise : null,
+          sunset: times.sunset instanceof Date ? times.sunset : null
         };
-      } catch(e) {
-        // ignore => fallback heuristique
+      } catch (_) {
+        // Keep the deterministic time-based fallback.
       }
     }
-    const { sunrise: sr, sunset: ss } = timesRef.current;
-    if (sr instanceof Date && ss instanceof Date && !isNaN(sr) && !isNaN(ss)) {
-      const dark = !(now >= sr && now < ss); // noir avant sunrise ou après sunset
-      return dark;
+
+    const { sunrise, sunset } = timesRef.current;
+    if (sunrise instanceof Date && sunset instanceof Date
+      && !Number.isNaN(sunrise.getTime()) && !Number.isNaN(sunset.getTime())) {
+      return !(now >= sunrise && now < sunset);
     }
-    // Fallback : 7h-19h clair
-    const h = now.getHours();
-    return !(h >= 7 && h < 19);
+    return fallbackDarkMode(now);
   }, [coords]);
 
   useEffect(() => {
@@ -52,47 +57,66 @@ export function ThemeProvider({ children }) {
     else setDarkMode(computeAuto());
   }, [userTheme, computeAuto]);
 
-  // Récupération des coordonnées navigateur (une seule fois)
   useEffect(() => {
-    if (!('geolocation' in navigator)) return;
+    if (!('geolocation' in navigator)) return undefined;
+    let active = true;
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+      position => {
+        if (!active) return;
+        const { latitude, longitude } = position.coords || {};
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          setCoords({ lat: latitude, lon: longitude });
+        }
       },
-      () => { /* refus -> fallback heuristique */ },
-      { enableHighAccuracy: false, maximumAge: 6*60*60*1000, timeout: 8000 }
+      () => { /* refusal intentionally uses the deterministic fallback */ },
+      { enableHighAccuracy: false, maximumAge: 6 * 60 * 60 * 1000, timeout: 8000 }
     );
+    return () => { active = false; };
   }, []);
 
-  // Rafraîchissement périodique en mode auto (toutes les minutes) + planification jusqu'à prochain lever/coucher si disponibles
   useEffect(() => {
-    if (userTheme != null) return; // seulement auto
-    function tick() { setDarkMode(computeAuto()); schedule(); }
-    function schedule() {
+    if (userTheme !== null) {
       if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current);
-      const { sunrise, sunset } = timesRef.current;
-      const now = Date.now();
-      const targets = [sunrise, sunset].filter(d => d instanceof Date && !isNaN(d) && d.getTime() > now).map(d => d.getTime());
-      // Prochaine transition sinon dans 60s
-      const nextMs = targets.length ? Math.min(...targets) - now + 250 : 60_000;
-      recomputeTimerRef.current = setTimeout(tick, Math.max(5_000, Math.min(nextMs, 30*60*1000))); // borne max 30 min
+      recomputeTimerRef.current = null;
+      return undefined;
     }
+
+    let active = true;
+    const schedule = () => {
+      if (!active) return;
+      if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current);
+      const now = Date.now();
+      const targets = [timesRef.current.sunrise, timesRef.current.sunset]
+        .filter(date => date instanceof Date && !Number.isNaN(date.getTime()) && date.getTime() > now)
+        .map(date => date.getTime());
+      const nextMs = targets.length ? Math.min(...targets) - now + 250 : 60_000;
+      recomputeTimerRef.current = setTimeout(tick, Math.max(5_000, Math.min(nextMs, 30 * 60 * 1000)));
+    };
+    const tick = () => {
+      if (!active) return;
+      setDarkMode(computeAuto());
+      schedule();
+    };
+
     schedule();
-    return () => { if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current); };
+    return () => {
+      active = false;
+      if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current);
+      recomputeTimerRef.current = null;
+    };
   }, [userTheme, computeAuto]);
 
-  const cycleTheme = () => {
-    setUserTheme(prev => {
-      if (prev === 'dark') return 'light';
-      if (prev === 'light') return null; // back to auto
-      // prev null
+  const cycleTheme = useCallback(() => {
+    setUserTheme(previous => {
+      if (previous === 'dark') return 'light';
+      if (previous === 'light') return null;
       return darkMode ? 'light' : 'dark';
     });
-  };
+  }, [darkMode, setUserTheme]);
 
   return createElement(
     ThemeContext.Provider,
-    { value: { darkMode, userTheme, cycleTheme } },
+    { value: { darkMode, userTheme: userTheme === 'dark' || userTheme === 'light' ? userTheme : null, cycleTheme } },
     children
   );
 }
@@ -100,3 +124,5 @@ export function ThemeProvider({ children }) {
 export function useTheme() {
   return useContext(ThemeContext);
 }
+
+export { fallbackDarkMode };

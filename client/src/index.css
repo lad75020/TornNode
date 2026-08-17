@@ -165,3 +165,250 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Analytics dashboard shell */
+.app-root {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.analytics-chart-slider {
+  width: 100%;
+  min-width: 0;
+}
+
+.dashboard-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-bottom: 0.75rem;
+}
+
+.dashboard-chart-header [data-testid="chart-view-state"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.dashboard-autoplay-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dashboard-autoplay-control input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: #0d6efd;
+}
+
+.dashboard-chart-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 18rem;
+  overflow: hidden;
+  border-radius: 0.5rem;
+}
+
+.dashboard-chart-zone canvas {
+  max-width: 100%;
+}
+
+.dashboard-chart-loading,
+.dashboard-chart-error {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 15rem;
+  padding: 2rem 1rem;
+  border: 1px solid rgba(108, 117, 125, 0.35);
+  border-radius: 0.5rem;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-chart-loading {
+  color: #495057;
+  background: rgba(108, 117, 125, 0.08);
+}
+
+.dashboard-chart-error {
+  color: #842029;
+  background: #f8d7da;
+  border-color: #f1aeb5;
+}
+
+.dashboard-chart-error button {
+  background: #842029;
+  color: #fff;
+  border-color: #842029;
+}
+
+.dashboard-chart-navigation {
+  min-width: 0;
+}
+
+.dashboard-chart-navigation button {
+  min-width: 8rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-date-controls {
+  min-width: 0;
+}
+
+.dashboard-date-controls > div {
+  max-width: 100%;
+}
+
+.dashboard-date-controls input {
+  max-width: 100%;
+}
+
+.dashboard-notification-region {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2100;
+  display: grid;
+  gap: 0.6rem;
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.dashboard-toast {
+  pointer-events: auto;
+  overflow: hidden;
+  color: #fff;
+  background: #343a40;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.2);
+}
+
+.dashboard-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem 0.35rem;
+}
+
+.dashboard-toast-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-toast-header .btn-close {
+  flex: 0 0 auto;
+}
+
+.dashboard-toast-body {
+  padding: 0.15rem 0.75rem 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-toast-details {
+  max-height: 10rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow: auto;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.16);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.dashboard-toast-progress {
+  height: 0.2rem;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.dashboard-toast-progress > div {
+  height: 100%;
+  background: #fff;
+  transition: width 0.2s linear;
+}
+
+.dashboard-toast-success { background: #146c43; }
+.dashboard-toast-warning { background: #997404; }
+.dashboard-toast-error { background: #b02a37; }
+.dashboard-toast-info { background: #087990; }
+
+.app-root.dark-mode .dashboard-chart-loading {
+  color: #ced4da;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.app-root.dark-mode .dashboard-chart-error {
+  color: #f8d7da;
+  background: #58151c;
+  border-color: #842029;
+}
+
+.app-root.dark-mode .dashboard-chart-error button {
+  color: #fff;
+  background: #b02a37;
+  border-color: #b02a37;
+}
+
+@media (max-width: 576px) {
+  .dashboard-chart-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dashboard-autoplay-control {
+    min-height: 2.25rem;
+  }
+
+  .dashboard-chart-zone {
+    min-height: 14rem;
+  }
+
+  .dashboard-chart-navigation {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+
+  .dashboard-chart-navigation button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .dashboard-date-controls {
+    align-items: stretch !important;
+    width: 100%;
+  }
+
+  .dashboard-date-controls > div {
+    width: 100% !important;
+  }
+
+  .dashboard-notification-region {
+    top: 0.75rem;
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    max-height: calc(100vh - 1.5rem);
+  }
+}

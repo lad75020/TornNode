@@ -1,0 +1,210 @@
+analyzed_at: "2026-08-06T18:39:20Z"
+project_root: "/Volumes/WDBlack4TB/Code/tornnode"
+total_features: 11
+completed: 3
+features:
+  - id: "authentication-and-sessions"
+    name: "Authentication and Sessions"
+    description: "Users can sign in securely, maintain an authenticated session, access protected pages and WebSockets, and sign out."
+    files:
+      - "routes/authenticate.cjs"
+      - "routes/protectIndex.cjs"
+      - "ws/wsCheckSession.cjs"
+      - "ws/wsDestroySession.cjs"
+      - "client/src/Login.jsx"
+      - "server.cjs"
+    status: done # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: "feature/time-machine-authentication-and-sessions"
+    pushed: true # null | true | false
+    started_at: "2026-08-06T18:44:39Z"
+    completed_at: "2026-08-17T14:20:00Z"
+
+  - id: "realtime-application-runtime"
+    name: "Realtime Application Runtime"
+    description: "Users receive resilient realtime updates through authenticated WebSocket connections backed by the Fastify application runtime."
+    files:
+      - "server.cjs"
+      - "socketEvents.cjs"
+      - "routes/wsHandler.cjs"
+      - "client/src/hooks/useAppWebSocket.js"
+      - "client/src/hooks/useWsMessageBus.js"
+      - "openapi-ws.yaml"
+    status: done # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: "feature/time-machine-realtime-application-runtime"
+    pushed: false # null | true | false
+    started_at: "2026-08-17T14:21:00Z"
+    completed_at: "2026-08-17T15:00:00Z"
+
+  - id: "torn-data-synchronization"
+    name: "Torn Data Synchronization"
+    description: "Users can import Torn logs, attacks, items, and profile data with progress reporting and retain the data locally for fast analysis."
+    files:
+      - "ws/wsTorn.cjs"
+      - "ws/wsTornAttacks.cjs"
+      - "ws/wsGetAllTornLogs.cjs"
+      - "ws/wsGetTornAttacks.cjs"
+      - "ws/wsGetAllTornItems.cjs"
+      - "client/src/storeLogsToIndexedDB.jsx"
+      - "client/src/syncItemsToIndexedDB.js"
+      - "client/src/dbLayer.js"
+      - "utils/ensureUserDbStructure.cjs"
+      - "utils/getUserDb.cjs"
+    status: done # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: "feature/time-machine-torn-data-synchronization"
+    pushed: false # null | true | false
+    started_at: "2026-08-17T18:13:47Z"
+    completed_at: "2026-08-17T19:00:35Z"
+
+  - id: "analytics-dashboard-shell"
+    name: "Analytics Dashboard Shell"
+    description: "Users can navigate a lazy-loaded chart dashboard, filter analytics by date, switch themes, and receive progress and result notifications."
+    files:
+      - "client/src/main.jsx"
+      - "client/src/index.css"
+      - "client/src/chartSetup.js"
+      - "client/src/chartTheme.js"
+      - "client/src/useChartTheme.js"
+      - "client/src/dateFilterUtil.js"
+      - "client/src/hooks/themeContext.js"
+      - "client/src/hooks/useChartSlider.js"
+      - "client/src/ToastHost.jsx"
+      - "client/src/toastBus.js"
+    status: done # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: "feature/time-machine-analytics-dashboard-shell"
+    pushed: true # null | true | false
+    started_at: "2026-08-17T19:07:34Z"
+    completed_at: "2026-08-17T19:44:36Z"
+
+  - id: "item-catalog-and-pricing"
+    name: "Item Catalog and Pricing"
+    description: "Users can browse and filter Torn items, inspect current prices, update stored prices, and keep the catalog synchronized locally."
+    files:
+      - "client/src/Autocomplete.jsx"
+      - "client/src/ItemsTypeDropdown.jsx"
+      - "client/src/UpdatePrice.jsx"
+      - "client/src/indexeddbUtils.js"
+      - "client/src/syncItemsToIndexedDB.js"
+      - "ws/wsGetAllTornItems.cjs"
+      - "ws/wsUpdatePrice.cjs"
+      - "utils/warmupItemsCache.cjs"
+      - "utils/itemsCacheKey.cjs"
+    status: pending # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: null
+    pushed: null # null | true | false
+    started_at: null
+    completed_at: null
+
+  - id: "bazaar-monitoring"
+    name: "Bazaar Monitoring"
+    description: "Users can watch bazaar items, track live minimum prices and thresholds, inspect sales history, and access a public bazaar view."
+    files:
+      - "ws/wsBazaarPrice.cjs"
+      - "ws/priceState.cjs"
+      - "ws/wsDailyPriceAverages.cjs"
+      - "dailyPriceAverager.cjs"
+      - "routes/subscribe.cjs"
+      - "client/src/hooks/useBazaarAlerts.js"
+      - "client/src/BazaarTable.jsx"
+      - "client/src/BazaarSalesGraph.jsx"
+      - "client/src/DailyPriceAveragesChart.jsx"
+      - "client/src/PublicBazaarPage.jsx"
+    status: pending # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: null
+    pushed: null # null | true | false
+    started_at: null
+    completed_at: null
+
+  - id: "combat-and-progression-analytics"
+    name: "Combat and Progression Analytics"
+    description: "Users can analyze attacks, battle stats, work stats, racing progress, and crime-skill progression over time."
+    files:
+      - "client/src/AttacksStatsGraph.jsx"
+      - "client/src/GymGraph.jsx"
+      - "client/src/WorkStatsGraph.jsx"
+      - "client/src/RacingPositionGraph.jsx"
+      - "client/src/RacingSkillGraph.jsx"
+      - "client/src/CrimeScatterGraph.jsx"
+      - "ws/wsGetTornAttacks.cjs"
+      - "ws/wsRacingSkill.cjs"
+      - "ws/wsStats.cjs"
+    status: pending # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: null
+    pushed: null # null | true | false
+    started_at: null
+    completed_at: null
+
+  - id: "wealth-and-finance-analytics"
+    name: "Wealth and Finance Analytics"
+    description: "Users can track net worth, faction balances, gambling outcomes, market costs, income, and bounty rewards."
+    files:
+      - "client/src/NetworthGraph.jsx"
+      - "client/src/NetworthPieChart.jsx"
+      - "client/src/FactionBalance.jsx"
+      - "client/src/BetResultsGraph.jsx"
+      - "client/src/PokerBetWinGraph.jsx"
+      - "client/src/MoneyLogGraph.jsx"
+      - "client/src/MoneyGainedGraph.jsx"
+      - "client/src/CombinedCostsGraph.jsx"
+      - "client/src/BountyRewardChart.jsx"
+      - "ws/wsInsertNetworth.cjs"
+      - "ws/wsGetNetworth.cjs"
+      - "ws/wsLastNetworthStats.cjs"
+    status: pending # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: null
+    pushed: null # null | true | false
+    started_at: null
+    completed_at: null
+
+  - id: "activity-and-consumables-analytics"
+    name: "Activity and Consumables Analytics"
+    description: "Users can explore revives, Xanax use and receipts, blood and medical-item activity, acquired items, and travel duration."
+    files:
+      - "client/src/LogsGraph.jsx"
+      - "client/src/XanaxBarGraph.jsx"
+      - "client/src/XanaxReceivedChart.jsx"
+      - "client/src/BloodCountGraph.jsx"
+      - "client/src/BloodAidDailyChart.jsx"
+      - "client/src/ItemsGainedGraph.jsx"
+      - "client/src/TravelDurationGraph.jsx"
+      - "client/src/JsonPreview.jsx"
+      - "client/src/jsonview.js"
+      - "utils/computeStatsFromOldStats.js"
+    status: pending # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: null
+    pushed: null # null | true | false
+    started_at: null
+    completed_at: null
+
+  - id: "company-analytics"
+    name: "Company Analytics"
+    description: "Users can capture and analyze company stock, profile, details, training ranges, and historical trends."
+    files:
+      - "client/src/CompanyStockChart.jsx"
+      - "client/src/CompanyStockHistoryChart.jsx"
+      - "client/src/CompanyProfileChart.jsx"
+      - "client/src/CompanyDetailsHistoryChart.jsx"
+      - "ws/wsCompanyStock.cjs"
+      - "ws/wsGetCompanyStock.cjs"
+      - "ws/wsGetCompanyStockHistory.cjs"
+      - "ws/wsCompanyProfile.cjs"
+      - "ws/wsGetCompanyProfile.cjs"
+      - "ws/wsGetCompanyProfileHistory.cjs"
+      - "ws/wsCompanyDetails.cjs"
+      - "ws/wsGetCompanyDetailsHistory.cjs"
+      - "ws/wsCompanyTrainRange.cjs"
+    status: pending # pending | in-progress | done | skipped
+    current_phase: null # null | specify | clarify | plan | tasks | implement
+    branch: null
+    pushed: null # null | true | false
+    started_at: null
+    completed_at: null
+

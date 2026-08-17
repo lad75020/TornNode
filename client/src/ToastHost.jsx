@@ -1,60 +1,105 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { subscribeToasts } from './toastBus.js';
+import { sanitizeToastDetail, subscribeToasts } from './toastBus.js';
+
+let nextToastId = 1;
+const DEFAULT_TTL = 6000;
+
+function makeToast(detail) {
+  const safeDetail = sanitizeToastDetail(detail) || {};
+  const ttl = safeDetail.ttl || DEFAULT_TTL;
+  return {
+    id: safeDetail.key || `toast-${nextToastId++}`,
+    ...safeDetail,
+    ttl,
+    initialTtl: ttl
+  };
+}
 
 export default function ToastHost() {
-  const [toasts, setToasts] = useState([]); // {id, ttl, kind, title, body, raw}
+  const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
-    const unsub = subscribeToasts(ev => {
-      const t = ev.detail || {};
-      setToasts(prev => {
-        if (t.replace && t.key) {
-          const existingIdx = prev.findIndex(x => x.key === t.key);
-          if (existingIdx >= 0) {
-            const clone = [...prev];
-            clone[existingIdx] = { ...clone[existingIdx], ...t, id: clone[existingIdx].id, ttl: t.ttl || clone[existingIdx].ttl || 6000, initialTtl: t.ttl || clone[existingIdx].initialTtl || 6000 };
-            return clone;
+    const unsubscribe = subscribeToasts(event => {
+      const incoming = makeToast(event.detail);
+      setToasts(previous => {
+        if (incoming.replace && incoming.key) {
+          const existingIndex = previous.findIndex(toast => toast.key === incoming.key);
+          if (existingIndex >= 0) {
+            const updated = [...previous];
+            updated[existingIndex] = {
+              ...updated[existingIndex],
+              ...incoming,
+              id: updated[existingIndex].id,
+              ttl: incoming.persistent ? updated[existingIndex].ttl : incoming.ttl,
+              initialTtl: incoming.persistent ? updated[existingIndex].initialTtl : incoming.initialTtl
+            };
+            return updated;
           }
-          return [...prev, { id: t.key, ttl: t.ttl || 6000, initialTtl: t.ttl || 6000, ...t }];
         }
-        return [...prev, { id: Math.random().toString(36).slice(2), ttl: t.ttl || 6000, initialTtl: t.ttl || 6000, ...t }];
+        return [...previous, incoming].slice(-20);
       });
     });
-    return unsub;
+    return unsubscribe;
   }, []);
 
-  // TTL decrement (isolated re-render not affecting Main)
   useEffect(() => {
-    if (!toasts.length) return;
-    const int = setInterval(() => {
-      setToasts(prev => prev
-        .map(t => {
-          if (t.persistent) return t; // pas de décrément pour les persistants
-          return { ...t, ttl: t.ttl - 1000 };
+    if (!toasts.length) return undefined;
+    const interval = window.setInterval(() => {
+      setToasts(previous => previous
+        .map(toast => {
+          if (toast.persistent) return toast;
+          return { ...toast, ttl: toast.ttl - 1000 };
         })
-        .filter(t => t.persistent || t.ttl > 0));
+        .filter(toast => toast.persistent || toast.ttl > 0));
     }, 1000);
-    return () => clearInterval(int);
+    return () => window.clearInterval(interval);
   }, [toasts.length]);
 
+  const dismiss = id => setToasts(previous => previous.filter(toast => toast.id !== id));
+
   return createPortal(
-    <div style={{ position:'fixed', top:10, right:10, zIndex:3000, display:'flex', flexDirection:'column', gap:8, maxWidth:320, pointerEvents:'none' }}>
-      {toasts.map(t => (
-        <div key={t.id} className={`border rounded shadow-sm p-2 bg-${t.kind==='success'?'success':t.kind==='error'?'danger':t.kind==='info'?'info':'secondary'} text-white`} style={{ fontSize:12, opacity:0.95, pointerEvents:'auto' }}>
-          <div className="d-flex justify-content-between align-items-start" style={{ gap:6 }}>
-            <strong>{t.title}</strong>
-            <button type="button" className="btn-close btn-close-white" style={{ filter:'invert(1) grayscale(1)', opacity:0.7 }} onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}></button>
-          </div>
-          <div>{t.body}</div>
-          {t.raw && <pre style={{ margin:0, marginTop:4, maxHeight:120, overflow:'auto', background:'rgba(0,0,0,0.15)', padding:4, borderRadius:4 }}>{JSON.stringify(t.raw, null, 2)}</pre>}
-          {!t.persistent && (
-            <div style={{ height:3, background:'rgba(255,255,255,0.3)', marginTop:4, position:'relative', overflow:'hidden' }}>
-              <div style={{ position:'absolute', top:0, left:0, height:'100%', width:`${(t.ttl/(t.initialTtl||6000))*100}%`, background:'rgba(255,255,255,0.85)', transition:'width 1000ms linear' }} />
+    <div
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+      className="dashboard-notification-region"
+      data-testid="notification-region"
+    >
+      {toasts.map(toast => {
+        const progress = toast.persistent
+          ? 100
+          : Math.max(0, Math.min(100, (toast.ttl / (toast.initialTtl || DEFAULT_TTL)) * 100));
+        const messageRole = toast.kind === 'error' ? 'alert' : 'status';
+        return (
+          <div
+            key={toast.id}
+            role={messageRole}
+            data-testid="dashboard-toast"
+            data-toast-key={toast.key || undefined}
+            className={`dashboard-toast dashboard-toast-${toast.kind}`}
+          >
+            <div className="dashboard-toast-header">
+              <strong>{toast.title}</strong>
+              <button
+                type="button"
+                className="btn-close btn-close-white"
+                aria-label={`Dismiss ${toast.title}`}
+                onClick={() => dismiss(toast.id)}
+              />
             </div>
-          )}
-        </div>
-      ))}
+            {toast.body && <div className="dashboard-toast-body">{toast.body}</div>}
+            {toast.raw && (
+              <pre className="dashboard-toast-details">{JSON.stringify(toast.raw, null, 2)}</pre>
+            )}
+            {!toast.persistent && (
+              <div className="dashboard-toast-progress" aria-hidden="true">
+                <div style={{ width: `${progress}%` }} />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>,
     document.body
   );

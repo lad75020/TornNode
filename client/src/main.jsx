@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect, useRef, Suspense, lazy, useCallback, useMemo, memo } from 'react';
+import { StrictMode, Component as ReactComponent, useState, useEffect, useRef, Suspense, lazy, useCallback, useMemo, memo } from 'react';
 import { setLogsCacheTTL, getLogsCacheTTL, invalidateAllCaches } from './dbLayer.js';
 import { CHART_HEIGHT } from './chartConstants.js';
 // BazaarTable chargé en lazy pour réduire le chunk initial
@@ -139,59 +139,119 @@ const Museum = lazy(() => import('./Museum.jsx'));
     }
   } catch (_) { /* ignore */ }
 })();
+function clampChartIndex(value, length) {
+  const count = Number.isFinite(Number(length)) && Number(length) > 0 ? Math.floor(Number(length)) : 0;
+  if (!count) return 0;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(Math.floor(numeric), count - 1));
+}
+
+function getChartIndexFromPath(pathname) {
+  const match = pathname.match(new RegExp('^/chart/([^/]+)$'));
+  return match ? clampChartIndex(match[1], chartComponents.length) : 0;
+}
+
+class ChartErrorBoundary extends ReactComponent {
+  state = { error: null };
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    try { console.error('[dashboard-chart] chart view failed to load', error); } catch (_) { /* ignore diagnostics */ }
+  }
+
+  handleRetry = () => {
+    this.setState({ error: null });
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="dashboard-chart-error" role="alert" data-testid="chart-error-state">
+          <strong>Chart could not be loaded.</strong>
+          <p>Choose another view or try loading this chart again.</p>
+          <button type="button" className="btn btn-sm btn-outline-danger" onClick={this.handleRetry}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ChartSlider doit être défini hors de Main
 const ChartSlider = memo(function ChartSlider({ token, logsUpdated, wsRef, wsMessages, sendWs, darkMode, slider, dateFrom, dateTo, onMinDate }) {
   const navigate = useNavigate();
   const { idx } = useParams();
-  const index = Math.max(0, Math.min(Number(idx) || 0, chartComponents.length - 1));
+  const index = clampChartIndex(idx, chartComponents.length);
   const { Component } = chartComponents[index];
-  const goPrev = useCallback(() => navigate(`/chart/${index - 1}`), [navigate, index]);
-  const goNext = useCallback(() => navigate(`/chart/${index + 1}`), [navigate, index]);
-  // Mise à jour de l'index dans le hook slider
-  useEffect(() => { slider.setIndex(index); }, [index]);
-  // Avance automatique gérée ici (le hook gère juste l'incrément interne)
-  // (Auto-play supprimé)
+  const goPrev = useCallback(() => {
+    if (index > 0) navigate(`/chart/${index - 1}`);
+  }, [navigate, index]);
+  const goNext = useCallback(() => {
+    if (index < chartComponents.length - 1) navigate(`/chart/${index + 1}`);
+  }, [navigate, index]);
 
   return (
-    <div className="d-flex flex-column" style={{ width: '100%' }}>
-      {/* Zone graphique à hauteur contrôlée */}
-  <div style={{ height: CHART_HEIGHT, width: '100%', display: 'flex', flexDirection: 'column', marginBottom: 50 }}>
-        <Suspense fallback={<div style={{ textAlign: 'center', padding: 40 }}>Chargement…</div>}>
-          <Component
-            key={index + ':' + (dateFrom || '') + ':' + (dateTo || '')}
-            token={token}
-            logsUpdated={logsUpdated}
-            wsRef={wsRef}
-            wsMessages={wsMessages}
-            sendWs={sendWs}
-            darkMode={darkMode}
-            chartHeight={CHART_HEIGHT}
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onMinDate={onMinDate}
+    <section className="d-flex flex-column analytics-chart-slider" data-testid="analytics-dashboard-shell" aria-label="Analytics dashboard">
+      <div className="dashboard-chart-header">
+        <div role="status" aria-live="polite" data-testid="chart-view-state">
+          Chart view: {chartComponents[index].name}
+        </div>
+        <label className="dashboard-autoplay-control">
+          <input
+            type="checkbox"
+            checked={slider.autoPlay}
+            onChange={event => slider.setAutoPlay(event.target.checked)}
+            aria-label="Enable chart autoplay"
           />
-        </Suspense>
+          <span>Auto-play</span>
+        </label>
       </div>
-      {/* Contrôles de navigation */}
-    <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap" style={{ gap: 8, position:'relative', zIndex: 20 }}>
+      <div className="dashboard-chart-zone" data-testid="chart-view-container">
+        <ChartErrorBoundary key={index}>
+          <Suspense fallback={<div className="dashboard-chart-loading" role="status" aria-live="polite" data-testid="chart-loading-state">Loading chart…</div>}>
+            <Component
+              key={index + ':' + (dateFrom || '') + ':' + (dateTo || '')}
+              token={token}
+              logsUpdated={logsUpdated}
+              wsRef={wsRef}
+              wsMessages={wsMessages}
+              sendWs={sendWs}
+              darkMode={darkMode}
+              chartHeight={CHART_HEIGHT}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+              onMinDate={onMinDate}
+            />
+          </Suspense>
+        </ChartErrorBoundary>
+      </div>
+      <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap dashboard-chart-navigation" style={{ gap: 8 }}>
         <button
+          type="button"
           className="btn btn-outline-secondary btn-sm"
           onClick={goPrev}
           disabled={index === 0}
-      style={{ minWidth: 110, position:'relative', zIndex:21 }}
+          aria-label={`Previous chart${index > 0 ? `: ${chartComponents[index - 1].name}` : ''}`}
         >
-          &lt; {index > 0 ? chartComponents[index - 1].name : ''}
+          &lt; {index > 0 ? chartComponents[index - 1].name : 'Previous'}
         </button>
         <button
+          type="button"
           className="btn btn-outline-secondary btn-sm"
           onClick={goNext}
           disabled={index === chartComponents.length - 1}
-      style={{ minWidth: 110, position:'relative', zIndex:21 }}
+          aria-label={`Next chart${index < chartComponents.length - 1 ? `: ${chartComponents[index + 1].name}` : ''}`}
         >
-          {index < chartComponents.length - 1 ? chartComponents[index + 1].name : ''} &gt;
+          {index < chartComponents.length - 1 ? chartComponents[index + 1].name : 'Next'} &gt;
         </button>
       </div>
-    </div>
+    </section>
   );
 });
 // WsbFeed supprimé après fusion des panneaux
@@ -229,9 +289,19 @@ const chartComponents = [
 
 function Main() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isMemoryPage = location.pathname.startsWith('/memory');
   const isWsTornTestPage = location.pathname.startsWith('/ws-torn-test');
   const isMuseumPage = location.pathname.startsWith('/museum');
+  const isPublicBazaarPage = location.pathname === '/public-bazaar';
+  const isChartRoute = location.pathname.startsWith('/chart/');
+  const routeChartIndex = getChartIndexFromPath(location.pathname);
+  const isDashboardRoute = !isMemoryPage && !isWsTornTestPage && !isMuseumPage && !isPublicBazaarPage;
+  useEffect(() => {
+    if (!isChartRoute) return;
+    const canonicalPath = `/chart/${routeChartIndex}`;
+    if (location.pathname !== canonicalPath) navigate(canonicalPath, { replace: true });
+  }, [isChartRoute, location.pathname, navigate, routeChartIndex]);
   const [authenticated, setAuthenticated] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   // The browser session cookie is authoritative; the token is only a UI
@@ -296,7 +366,11 @@ function Main() {
   // Bazaar alerts & persistence
   const { watchedItems, setWatchedItems, priceThresholds, setPriceThresholds, bazaarRows, blinkingItems } = useBazaarAlerts(wsBazaar.messages);
   // Slider
-  const slider = useChartSlider(chartComponents.length);
+  const slider = useChartSlider(chartComponents.length, {
+    currentIndex: routeChartIndex,
+    enabled: isDashboardRoute,
+    onAdvance: nextIndex => navigate(`/chart/${nextIndex}`)
+  });
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [showAccessKeys, setShowAccessKeys] = useState(false);
   const [selectedItemType, setSelectedItemType] = useState('');
@@ -337,6 +411,19 @@ function Main() {
 
   // Remove the first useEffect that closes the socket on logout
   const [storeProgress, setStoreProgress] = useState({ current: 0, total: 0, percent: 0, running: false });
+  const notificationTimeoutsRef = useRef(new Set());
+  const scheduleNotification = useCallback((callback, delay) => {
+    const timer = window.setTimeout(() => {
+      notificationTimeoutsRef.current.delete(timer);
+      callback();
+    }, delay);
+    notificationTimeoutsRef.current.add(timer);
+    return timer;
+  }, []);
+  useEffect(() => () => {
+    notificationTimeoutsRef.current.forEach(timer => window.clearTimeout(timer));
+    notificationTimeoutsRef.current.clear();
+  }, []);
   useEffect(() => { try { console.debug('[storeProgress]', storeProgress); } catch(_) {} }, [storeProgress]);
   // Ref pour toujours disposer de la valeur courante (évite fermeture obsolète)
   const storeProgressRef = useRef(storeProgress);
@@ -370,9 +457,14 @@ function Main() {
   const [logsImportPercent, setLogsImportPercent] = useState(0);
   const pendingStoreAfterLogsRef = useRef(false);
   // Date range (non persisté sauf minDate par chart)
+  const today = new Date().toISOString().slice(0, 10);
   const [dateFrom, setDateFrom] = useState(null); // string YYYY-MM-DD
   const [dateTo, setDateTo] = useState(null); // string YYYY-MM-DD
   const [minDatesPerChart, setMinDatesPerChart] = useState({}); // plus de persistance
+  const activeMinDate = minDatesPerChart[String(routeChartIndex)] || '';
+  const dateRangeError = dateFrom && dateTo && dateFrom > dateTo
+    ? 'The start date must be on or before the end date.'
+    : '';
   const handleMinDateReport = useCallback((chartIndex, dStr) => {
     if (!dStr || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dStr)) return;
     setMinDatesPerChart(prev => {
@@ -383,19 +475,18 @@ function Main() {
 
   // À chaque changement de graphique: reset range (min => connu si déjà calculé, sinon null) et max => aujourd'hui
   useEffect(() => {
-    const idxStr = String(slider.index);
-    const today = new Date().toISOString().slice(0,10);
+    const idxStr = String(routeChartIndex);
     setDateFrom(minDatesPerChart[idxStr] || null);
     setDateTo(today);
-  }, [slider.index]);
+  }, [routeChartIndex]);
 
   // Quand la minDate est découverte après chargement, si on est sur ce graph et que dateFrom est null ou > min -> ajuster
   useEffect(() => {
-    const idxStr = String(slider.index);
+    const idxStr = String(routeChartIndex);
     const min = minDatesPerChart[idxStr];
     if (!min) return;
     setDateFrom(prev => (prev === null || (prev && prev > min)) ? min : prev);
-  }, [minDatesPerChart, slider.index]);
+  }, [minDatesPerChart, routeChartIndex]);
   // Handler to fetch and store logs with progress is now imported from storeLogsToIndexedDB.jsx
   // Open websocket once when component mounts, close on unmount
   // Gestion WebSockets déléguée aux hooks useAppWebSocket / useBazaarAlerts
@@ -444,7 +535,7 @@ function Main() {
           raw: null
         });
         if (percentNum >= 100) {
-          setTimeout(() => {
+          scheduleNotification(() => {
             const finalAttacksSuffix = (kind === 'attacks' && attacksImportedCount > 0)
               ? ` – ${attacksImportedCount} attacks`
               : '';
@@ -738,7 +829,7 @@ function Main() {
             )}
           </div>
           <div className="d-flex align-items-center gap-2">
-            <span>
+            <span id="theme-mode" data-testid="theme-mode" role="status" aria-live="polite">
               {userTheme === null ? (darkMode ? 'Dark (auto)' : 'Light (auto)') : (darkMode ? 'Dark (manual)' : 'Light (manual)')}
             </span>
             <button
@@ -747,6 +838,7 @@ function Main() {
               className="btn btn-sm btn-outline-secondary"
               style={{ fontSize: 10 }}
               title="Cycle theme: dark → light → auto"
+              aria-describedby="theme-mode"
             >
               Theme
             </button>
@@ -846,8 +938,8 @@ function Main() {
           </Suspense>
         )}
       />
-      <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
-      <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(slider.index), d)} />} />
+      <Route path="/chart/:idx" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(routeChartIndex), d)} />} />
+      <Route path="*" element={<ChartSlider token={token} logsUpdated={logsUpdated} wsRef={wsMain.wsRef} wsMessages={wsMain.messages} darkMode={darkMode} slider={slider} sendWs={sendWithPulse} dateFrom={dateFrom} dateTo={dateTo} onMinDate={d => handleMinDateReport(String(routeChartIndex), d)} />} />
     </Routes>
   {!isMemoryPage && (
     <>
@@ -856,26 +948,51 @@ function Main() {
       {/* Barre d'outils et modals */}
 
       <div className="row mb-4 align-items-start">
-        <div className="col-auto d-flex align-items-end" style={{gap:6}}>
-          <div className="d-flex flex-column" style={{width:130}}>
-            <label className="form-label mb-1" style={{fontSize:12}}>From</label>
-            <input type="date" className="form-control form-control-sm" value={dateFrom || ''} max={dateTo || new Date().toISOString().slice(0,10)} min={minDatesPerChart[String(slider.index)] || ''}
-              onChange={e => {
-                const v = e.target.value || null;
-                const minAllowed = minDatesPerChart[String(slider.index)];
-                if (v && minAllowed && v < minAllowed) return; // ignore invalid
-                setDateFrom(v);
-              }} />
+        <div className="col-auto d-flex align-items-end flex-wrap dashboard-date-controls" style={{ gap: 6 }}>
+          <div className="d-flex flex-column" style={{ width: 130 }}>
+            <label className="form-label mb-1" style={{ fontSize: 12 }} htmlFor="analytics-date-from">From</label>
+            <input
+              id="analytics-date-from"
+              type="date"
+              className="form-control form-control-sm"
+              aria-label="From date"
+              aria-invalid={Boolean(dateRangeError)}
+              aria-describedby={dateRangeError ? 'analytics-date-error' : undefined}
+              value={dateFrom || ''}
+              max={dateTo || today}
+              min={activeMinDate}
+              onChange={event => {
+                const value = event.target.value || null;
+                if (value && activeMinDate && value < activeMinDate) return;
+                if (value && dateTo && value > dateTo) return;
+                setDateFrom(value);
+              }}
+            />
           </div>
-          <div className="d-flex flex-column" style={{width:130}}>
-            <label className="form-label mb-1" style={{fontSize:12}}>To</label>
-            <input type="date" className="form-control form-control-sm" value={dateTo || ''} max={new Date().toISOString().slice(0,10)} min={dateFrom || minDatesPerChart[String(slider.index)] || ''}
-              onChange={e => {
-                const v = e.target.value || null;
-                if (v && dateFrom && v < dateFrom) return; // ignore invalid
-                setDateTo(v);
-              }} />
+          <div className="d-flex flex-column" style={{ width: 130 }}>
+            <label className="form-label mb-1" style={{ fontSize: 12 }} htmlFor="analytics-date-to">To</label>
+            <input
+              id="analytics-date-to"
+              type="date"
+              className="form-control form-control-sm"
+              aria-label="To date"
+              aria-invalid={Boolean(dateRangeError)}
+              aria-describedby={dateRangeError ? 'analytics-date-error' : undefined}
+              value={dateTo || ''}
+              max={today}
+              min={dateFrom || activeMinDate}
+              onChange={event => {
+                const value = event.target.value || null;
+                if (value && value > today) {
+                  setDateTo(today);
+                  return;
+                }
+                if (value && dateFrom && value < dateFrom) return;
+                setDateTo(value);
+              }}
+            />
           </div>
+          {dateRangeError && <div id="analytics-date-error" className="text-danger small" role="alert">{dateRangeError}</div>}
         </div>
         <div className="col-auto p-0 d-flex align-items-center flex-wrap" style={{rowGap:4}}>
           <button
@@ -964,11 +1081,11 @@ function Main() {
           {(storeProgress.running || storeProgress.percent === 100) && (
             <div className="d-flex align-items-center" style={{ gap: 6 }}>
               <div style={{ width: 150 }}>
-                <div className="progress" style={{ height: 14 }}>
+                <div className="progress" role="status" aria-live="polite" aria-label="Dashboard synchronization progress" style={{ height: 14 }}>
                   <div
                     className={`progress-bar ${storeProgress.running ? 'progress-bar-striped progress-bar-animated' : ''}`}
                     role="progressbar"
-                    style={{ width: `${storeProgress.percent}%` }}
+                    style={{ width: `${Math.max(0, Math.min(100, storeProgress.percent))}%` }}
                     aria-valuenow={storeProgress.current}
                     aria-valuemin={0}
                     aria-valuemax={storeProgress.total}
@@ -978,13 +1095,15 @@ function Main() {
                 </div>
               </div>
               {(!storeProgress.running && storeProgress.percent === 100) && (
-                <span
+                <button
+                  type="button"
                   className="btn btn-sm btn-success"
                   onClick={() => setStoreProgress({ current: 0, total: 0, percent: 0, running: false })}
                   title="Réinitialiser la barre de progression"
+                  aria-label="Dismiss completed synchronization progress"
                 >
                   ✅
-                </span>
+                </button>
               )}
             </div>
           )}

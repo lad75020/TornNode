@@ -1,0 +1,39 @@
+- [X] T001 [P] Create spec directory for feature `002-realtime-application-runtime` with markdown artifacts
+- [X] T002 [P] Create tasks.md scaffold for this feature under `specs/002-realtime-application-runtime/`
+- [X] T003 [P] Create contract markdown files `contracts/realtime-connection.md` and `contracts/message-dispatch.md`
+- [X] T004 [P] Verify environment variables for keep-alive: `WS_PING_INTERVAL_MS`, `WS_PONG_TIMEOUT_MS`, `RECONNECT_MS`, `HEARTBEAT_MS` documented in plan
+- [X] T005 [P] Add `socketClose` emission to `socketEvents.cjs` on socket close (new signal for consumers)
+- [X] T006 [P] Ensure Fastify WebSocket route `/ws` is authenticated only via session cookie (no query tokens) in `routes/wsHandler.cjs`
+- [X] T007 [P] Ensure `useAppWebSocket` hook accepts `heartbeatMs`, `reconnectMs`, `maxMessages` options and exposes `status` (`connecting|open|closed`)
+- [X] T008 [P] [US1] Contract test for authenticated WebSocket connect in `tests/ws/contract/test_ws_auth_connect.mjs`
+- [X] T009 [P] [US1] Contract test for unauthenticated close (4401) in `tests/ws/contract/test_ws_unauth_close.mjs`
+- [X] T010 [P] [US1] Integration test for same-origin URL construction in `tests/client/integration/test_ws_url_origin.mjs`
+- [X] T011 [P] [US1] Implement same-origin WebSocket URL builder in `client/src/hooks/useAppWebSocket.js` (derive from `window.location`, avoid credentials)
+- [X] T012 [P] [US1] Enforce cookie-only auth in `routes/wsHandler.cjs` (reject token/query-string auth; close 4401)
+- [X] T013 [US1] Ensure server sends `auth.ok:false` frame on invalid session before close (contract)
+- [X] T014 [US1] Verify server emits `newSocket` on successful upgrade for consumer registration
+- [X] T015 [P] [US2] Contract test for transient reconnect cadence in `tests/ws/contract/test_ws_reconnect_transient.mjs`
+- [X] T016 [P] [US2] Contract test for no-reconnect on 4401 in `tests/ws/contract/test_ws_no_reconnect_4401.mjs`
+- [X] T017 [P] [US2] Integration test for timer cleanup on unmount in `tests/client/integration/test_ws_unmount_cleanup.mjs`
+- [X] T018 [P] [US2] Implement bounded single-timer reconnect loop in `client/src/hooks/useAppWebSocket.js` (single pending timer, cancel on open/unmount)
+- [X] T019 [P] [US2] Distinguish transient vs auth-failing close in `client/src/hooks/useAppWebSocket.js` (4401 → no reconnect, else reconnect)
+- [X] T020 [US2] Ensure reconnect respects `reconnectMs` config and avoids duplicate timers (merge with T018)
+- [X] T021 [US2] Add `status` state machine updates (`connecting`/`open`/`closed`) in `client/src/hooks/useAppWebSocket.js`
+- [X] T022 [P] [US3] Contract test for status transitions in `tests/client/contract/test_ws_status.mjs`
+- [X] T023 [P] [US3] Playwright test for status indicator UI in `tests/e2e/status_indicator.spec.js`
+- [X] T024 [P] [US3] Expose `status` from `useAppWebSocket` hook with discrete states
+- [X] T025 [P] [US3] Render non-blocking status indicator in `client/src/components/RealtimeStatus.jsx`
+- [X] T026 [US3] Wire status to dashboard (read-only) without gating renders
+- [X] T027 [P] [US4] Contract test for message dispatch by type in `tests/ws/contract/test_message_dispatch_type.mjs`
+- [X] T028 [P] [US4] Contract test for malformed frame skip in `tests/ws/contract/test_message_malformed_skip.mjs`
+- [X] T029 [P] [US4] Contract test for bounded backlog in `tests/client/contract/test_message_backlog_bound.mjs`
+- [X] T030 [P] [US4] Ensure `useWsMessageBus.js` uses latest-intent handler ref (already present) and skips undecodable frames without throwing
+- [X] T031 [P] [US4] Enforce `maxMessages` backlog (default 800) in `useWsMessageBus.js` (drop oldest beyond bound)
+- [X] T032 [US4] Harden server command router in `routes/wsHandler.cjs` to catch JSON parse failures and log safely without throwing
+- [X] T033 [US4] Add optional `onMalformed` hook stub in `useWsMessageBus.js` for future use without breaking existing consumers
+- [X] T034 [P] Update `openapi-ws.yaml` to document reconnect/classification and keep-alive semantics for consumers
+- [X] T035 [P] Add documentation in `specs/002-realtime-application-runtime/quickstart.md` for validation commands
+- [X] T036 [P] Code cleanup and refactor for hook options defaults
+- [X] T037 [P] Add unit tests for keep-alive watchdog timer cleanup in `tests/server/unit/test_ws_keepalive_cleanup.mjs`
+- [X] T038 [P] Security hardening: ensure no exception text leaks to client on dependency failure in `routes/wsHandler.cjs`
+- [X] T039 [P] Run quickstart.md validation (`npm run test:runtime`, `npm run test:runtime:browser`, `npm run build`)

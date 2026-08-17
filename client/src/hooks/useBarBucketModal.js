@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 // Hook générique pour les graphes Bar nécessitant une modal JSON des buckets.
 // buildBuckets: async () => ({ labels, sums, bucketObjects })
@@ -22,8 +22,8 @@ export default function useBarBucketModal({ buildBuckets, buildPayload, deps = [
         if (cancelled) return;
         setData({ labels, sums });
         setBucketObjects(objs);
-      } catch (e) {
-        if (!cancelled) setError(e);
+      } catch {
+        if (!cancelled) setError('Unable to load chart data.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -53,7 +53,11 @@ export default function useBarBucketModal({ buildBuckets, buildPayload, deps = [
     if (label) openModalForLabel(label);
   }, [openModalForLabel]);
 
-  const payload = modalLabel ? buildPayload(modalLabel, modalItems) : null;
+  const payload = useMemo(() => {
+    if (!modalLabel) return null;
+    try { return buildPayload(modalLabel, modalItems); }
+    catch { return { bucket: modalLabel, items: [], unavailable: true }; }
+  }, [buildPayload, modalItems, modalLabel]);
 
   return {
     data,

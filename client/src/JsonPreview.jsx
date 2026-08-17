@@ -50,6 +50,7 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
 
   useEffect(() => {
     if (!containerRef.current) return;
+    let cancelled = false;
     
     // Create a stable string representation of the filtered value to compare
     const currentValueStr = JSON.stringify(filteredValue);
@@ -84,9 +85,11 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
     setFailed(false);
     lastRenderedValueRef.current = currentValueStr;
     
+    let restoreTimer;
     (async () => {
       try {
         const jsonview = await ensureJsonView();
+        if (cancelled || !containerRef.current) return;
         if (typeof jsonview.renderJSON !== 'function') throw new Error('renderJSON missing');
         const safe = JSON.parse(JSON.stringify(filteredValue, (k, v) => {
           if (Array.isArray(v) && v.length > 1500) {
@@ -94,18 +97,18 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
           }
             return v;
         }));
-        // Display only the nested collection at value.root.items if available; otherwise, display the full object
-        console.log(JSON.stringify(safe));
+        // Display only the nested collection at value.root.items if available; otherwise, display the full object.
         const toDisplay = (safe && safe.items && Array.isArray(safe.items))
           ? safe.items
           : (safe && safe.object && safe.object.root && Array.isArray(safe.object.root.items))
             ? safe.object.root.items
             : safe;
         const instance = jsonview.renderJSON({ root: toDisplay }, containerRef.current);
+        if (cancelled) return;
         jsonViewInstanceRef.current = instance;
         
         // Restore expansion state after a short delay to ensure DOM is ready
-        setTimeout(() => {
+        restoreTimer = setTimeout(() => {
           const restoreExpansionState = (container) => {
             const collapsedNodes = container.querySelectorAll('.fa-caret-right');
             collapsedNodes.forEach((node) => {
@@ -128,16 +131,22 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
             });
           };
           
-          if (containerRef.current && Object.keys(expansionState).length > 0) {
+          if (!cancelled && containerRef.current && Object.keys(expansionState).length > 0) {
             restoreExpansionState(containerRef.current);
           }
         }, 10);
         
-      } catch (e) {
-        setFailed(true);
-        setErrorMsg(e.message || String(e));
+      } catch {
+        if (!cancelled) {
+          setFailed(true);
+          setErrorMsg('Preview unavailable');
+        }
       }
     })();
+    return () => {
+      cancelled = true;
+      if (restoreTimer) clearTimeout(restoreTimer);
+    };
   }, [filteredValue]);
 
   const filterUi = enableFilter ? (
@@ -166,9 +175,9 @@ export default function JsonPreview({ value, className, style, enableFilter = tr
     return (
       <div className={className} style={style}>
         {filterUi}
-        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#111', color: '#f55', padding: 8 }}>
-JSON render fallback (raw)\nReason: {errorMsg}\n---\n{(() => { try { return JSON.stringify(filteredValue, null, 2); } catch { return 'Unserializable'; } })()}
-        </pre>
+        <div style={{ fontSize: 12, background: '#111', color: '#f55', padding: 8 }}>
+          {errorMsg || 'Preview unavailable'}
+        </div>
       </div>
     );
   }

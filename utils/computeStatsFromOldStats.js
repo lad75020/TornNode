@@ -32,30 +32,47 @@ const argv = yargs(hideBin(process.argv))
   .alias('h', 'help')
   .parse();
 
-const MONGO_URI = process.env.MONGODB_URI; //process.env.MONGODB_URI
+const MONGO_URI = process.env.MONGODB_URI || process.env.MONGODB_URI_TEST;
 if (!MONGO_URI) {
   console.error('Erreur: MONGODB_URI ou MONGODB_URI_TEST non défini');
   process.exit(1);
 }
 
 function safeJsonParse(str, fallback) {
-  try { return str ? JSON.parse(str) : fallback; } catch { return fallback; }
+  if (!str) return fallback;
+  try { return JSON.parse(str); } catch { throw new Error('Invalid source query'); }
 }
 
 // TODO: Remplacez par votre logique métier
 function computeNewStat(oldDoc) {
-  if (!oldDoc) return null;
+  if (!oldDoc || oldDoc._id === null || oldDoc._id === undefined || !oldDoc.personalstats || typeof oldDoc.personalstats !== 'object' || Array.isArray(oldDoc.personalstats)) return null;
   // Exemple: transformation minimale avec horodatage de calcul
   
   const newDoc = {};
   newDoc._id = oldDoc._id;
   newDoc.date = oldDoc.date;
 
+  const finite = value => {
+    if (typeof value !== 'number' && typeof value !== 'string') return null;
+    if (typeof value === 'string' && value.trim() === '') return null;
+    const number = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  const fields = ['strength', 'defense', 'dexterity', 'speed', 'manuallabor', 'intelligence', 'endurance'];
+  const values = Object.fromEntries(fields.map(key => [key, finite(oldDoc.personalstats[key])]));
+  if (Object.values(values).some(value => value === null)) return null;
+  const optionalFields = ['jobpointsused', 'trainsreceived', 'hospital', 'medicalitemsused', 'bloodwithdrawn', 'reviveskill', 'revives', 'revivesreceived', 'racingskill', 'racingpointsearned'];
+  const optionalValues = Object.fromEntries(optionalFields.map(key => {
+    const raw = oldDoc.personalstats[key];
+    return [key, raw === null || raw === undefined ? 0 : finite(raw)];
+  }));
+  if (Object.values(optionalValues).some(value => value === null)) return null;
+  const optional = key => optionalValues[key] ?? 0;
   const ps = {};
-  ps.battle_stats = {strength:oldDoc.personalstats.strength, defense: oldDoc.personalstats.defense, dexterity: oldDoc.personalstats.dexterity, speed: oldDoc.personalstats.speed, total: oldDoc.personalstats.strength + oldDoc.personalstats.defense + oldDoc.personalstats.dexterity + oldDoc.personalstats.speed};
-  ps.jobs = {stats : {manual : oldDoc.personalstats.manuallabor , intelligence: oldDoc.personalstats.intelligence, endurance: oldDoc.personalstats.endurance, total: oldDoc.personalstats.manuallabor + oldDoc.personalstats.intelligence + oldDoc.personalstats.endurance}, job_points_used: oldDoc.personalstats.jobpointsused, trains_received: oldDoc.personalstats.trainsreceived};
-  ps.hospital = {times_hospitalized: oldDoc.personalstats.hospital, medical_items_used: oldDoc.personalstats.medicalitemsused, blood_withdrawn: oldDoc.personalstats.bloodwithdrawn, reviving : {skill: oldDoc.personalstats.reviveskill, revives:oldDoc.personalstats.revives, revives_received:oldDoc.personalstats.revivesreceived}};
-  ps.racing = {skill: oldDoc.personalstats.racingskill, points: oldDoc.personalstats.racingpointsearned};
+  ps.battle_stats = { strength: values.strength, defense: values.defense, dexterity: values.dexterity, speed: values.speed, total: values.strength + values.defense + values.dexterity + values.speed };
+  ps.jobs = { stats: { manual: values.manuallabor, intelligence: values.intelligence, endurance: values.endurance, total: values.manuallabor + values.intelligence + values.endurance }, job_points_used: optional('jobpointsused'), trains_received: optional('trainsreceived') };
+  ps.hospital = { times_hospitalized: optional('hospital'), medical_items_used: optional('medicalitemsused'), blood_withdrawn: optional('bloodwithdrawn'), reviving: { skill: optional('reviveskill'), revives: optional('revives'), revives_received: optional('revivesreceived') } };
+  ps.racing = { skill: optional('racingskill'), points: optional('racingpointsearned') };
     newDoc.personalstats = ps;
   //newDoc.networth = {total: oldDoc.personalstats.networth, wallet: oldDoc.personalstats.networthwallet, bank: oldDoc.personalstats.networthbank, stocks: oldDoc.personalstats.stocks, properties: oldDoc.personalstats.properties, vehicles: oldDoc.personalstats.vehicles, business: oldDoc.personalstats.business};
   return newDoc;
@@ -64,6 +81,7 @@ function computeNewStat(oldDoc) {
 async function main() {
   const client = new MongoClient(MONGO_URI, { compressors: ['snappy'] });
   const startedAt = Date.now();
+  let cursor;
   try {
     await client.connect();
     const db = client.db(argv.db);
@@ -71,7 +89,8 @@ async function main() {
     const targetCol = db.collection(argv.target);
 
     const query = safeJsonParse(argv.query, {});
-    const cursor = sourceCol.find();
+    if (!query || typeof query !== 'object' || Array.isArray(query)) throw new Error('Invalid source query');
+    cursor = sourceCol.find(query);
 
     let readCount = 0;
     let writeCount = 0;
@@ -81,7 +100,8 @@ async function main() {
     while (await cursor.hasNext()) {
       const oldDoc = await cursor.next();
       readCount++;
-      const newDoc = computeNewStat(oldDoc);
+      let newDoc;
+      try { newDoc = computeNewStat(oldDoc); } catch { newDoc = null; }
       if (!newDoc) { skippedCount++; continue; }
       const setDoc = { ...newDoc };
       delete setDoc._id; // Pour éviter les conflits si upsert sans _id
@@ -119,10 +139,11 @@ async function main() {
 
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
     console.log(`[done] read=${readCount} written=${writeCount}${argv['dry-run'] ? ' (dry-run)' : ''} skipped=${skippedCount} in ${elapsed}s`);
-  } catch (err) {
-    console.error('[error]', err && err.message ? err.message : err);
+  } catch {
+    console.error('[error] migration failed');
     process.exitCode = 1;
   } finally {
+    try { await cursor?.close(); } catch {}
     try { await client.close(); } catch {}
   }
 }

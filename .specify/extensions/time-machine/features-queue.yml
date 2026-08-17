@@ -177,12 +177,12 @@ features:
       - "client/src/JsonPreview.jsx"
       - "client/src/jsonview.js"
       - "utils/computeStatsFromOldStats.js"
-    status: pending # pending | in-progress | done | skipped
+    status: done # pending | in-progress | done | skipped
     current_phase: null # null | specify | clarify | plan | tasks | implement
-    branch: null
-    pushed: null # null | true | false
-    started_at: null
-    completed_at: null
+    branch: "feature/time-machine-activity-and-consumables-analytics"
+    pushed: false # null | true | false
+    started_at: "2026-08-17T22:16:26Z"
+    completed_at: "2026-08-17T22:35:59Z"
 
   - id: "company-analytics"
     name: "Company Analytics"

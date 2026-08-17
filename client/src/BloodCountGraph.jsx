@@ -1,155 +1,17 @@
-import { useEffect, useState } from 'react';
-import { filterDatasetsByDate } from './dateFilterUtil.js';
-import useChartTheme from './useChartTheme.js';
-
+import { useEffect, useMemo, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
+import useChartTheme from './useChartTheme.js';
 import InlineStat from './InlineStat.jsx';
+import { getLogsByMultipleIds } from './dbLayer.js';
+import { toFiniteNumber } from './financeAnalytics.js';
+import { bucketChartData, chartBuckets, notifyMinDate, validTimestamp } from './activityChartUtils.js';
 
 export default function BloodCountGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
-  const [chartData, setChartData] = useState({ datasets: [] });
-  const [loading, setLoading] = useState(true);
-  const [showChart, setShowChart] = useState(true);
-  const [totalWithdrawal, setTotalWithdrawal] = useState(null);
-  const { themedOptions, ds } = useChartTheme(darkMode);
-
-  useEffect(() => {
-    const dbName = 'LogsDB';
-    const storeName = 'logs';
-    const request = window.indexedDB.open(dbName);
-    request.onsuccess = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains(storeName)) {
-        setLoading(false);
-        return;
-      }
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
-      const logIndex = store.index('log');
-      const logsToFetch = [2340, 2100];
-      const dayCounts = { 2340: {}, 2100: {} };
-      let pending = logsToFetch.length;
-      logsToFetch.forEach(logVal => {
-        const range = IDBKeyRange.only(logVal);
-        const cursorReq = logIndex.openCursor(range);
-        cursorReq.onsuccess = (e) => {
-          const cursor = e.target.result;
-          if (cursor) {
-            const obj = cursor.value;
-            if (typeof obj.timestamp === 'number') {
-              const day = new Date(obj.timestamp * 1000).toLocaleDateString();
-              if (!dayCounts[logVal][day]) {
-                dayCounts[logVal][day] = 0;
-              }
-              dayCounts[logVal][day]++;
-            }
-            cursor.continue();
-          } else {
-            pending--;
-            if (pending === 0) {
-              // Prepare chart data
-              // Store the earliest timestamp for each day from the log objects
-              const dayTsMap = {};
-              [2340, 2100].forEach(logVal => {
-                Object.keys(dayCounts[logVal]).forEach(day => {
-                  if (!dayTsMap[day]) {
-                    dayTsMap[day] = null;
-                  }
-                });
-              });
-              let pending2 = logsToFetch.length;
-              logsToFetch.forEach(logVal => {
-                const range = IDBKeyRange.only(logVal);
-                const cursorReq2 = logIndex.openCursor(range);
-                cursorReq2.onsuccess = (e2) => {
-                  const cursor2 = e2.target.result;
-                  if (cursor2) {
-                    const obj2 = cursor2.value;
-                    if (typeof obj2.timestamp === 'number') {
-                      const day = new Date(obj2.timestamp * 1000).toLocaleDateString();
-                      if (dayTsMap[day] === null || obj2.timestamp < dayTsMap[day]) {
-                        dayTsMap[day] = obj2.timestamp;
-                      }
-                    }
-                    cursor2.continue();
-                  } else {
-                    pending2--;
-                    if (pending2 === 0) {
-                      // After all cursors, sort days by min timestamp
-                      const sortedDays = Object.keys(dayTsMap)
-                        .map(day => ({ day, ts: dayTsMap[day] }))
-                        .sort((a, b) => a.ts - b.ts)
-                        .map(obj => obj.day);
-                              const data2340 = sortedDays.map(day => dayCounts[2340][day] || 0);
-                              const data2100 = sortedDays.map(day => (dayCounts[2100][day] ? -1 * dayCounts[2100][day] : 0));
-                              if (sortedDays.length && onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(sortedDays[0])) {
-                                try { onMinDate(sortedDays[0]); } catch {}
-                              }
-                              let datasets = [
-                                ds('bar', 0, data2340, { label: 'Deposit', borderWidth: 1 }),
-                                ds('bar', 1, data2100, { label: 'Withdrawal', borderWidth: 1 })
-                              ];
-                              const filtered = filterDatasetsByDate(sortedDays, datasets, dateFrom, dateTo);
-                              setChartData(filtered);
-                      // Calcul du total des retraits (withdrawal)
-                      const total = data2340.reduce((acc, v) => acc + v, 0);
-                      setTotalWithdrawal(total);
-                      setLoading(false);
-                    }
-                  }
-                };
-              });
-            }
-          }
-        };
-      });
-    };
-  }, [logsUpdated]);
-
-  return (
-    <div className="my-4">
-      <h5
-        style={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setShowChart((prev) => !prev)}
-        title="Click to show/hide chart"
-      >
-        Blood transactions
-      </h5>
-      {loading ? (
-        <div>
-          <img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: "80px" }} />
-        </div>
-      ) : (
-        showChart && (
-          <>
-            <div style={{ height: chartHeight }}>
-              <Bar
-                data={chartData}
-                options={themedOptions({
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: { display: true },
-                    title: { display: false },
-                    tooltip: { enabled: true },
-                  },
-                  scales: {
-                    x: {
-                      title: { display: true, text: 'Day' },
-                      type: 'category',
-                    },
-                    y: {
-                      title: { display: true, text: 'Count' },
-                      beginAtZero: true,
-                      type: 'linear',
-                    },
-                  },
-                })}
-              />
-            </div>
-            <InlineStat id="bloodTotalWithdrawals" label="Total withdrawals:" value={totalWithdrawal} />
-          </>
-        )
-      )}
-    </div>
-  );
+  const [rows, setRows] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(null); const [showChart, setShowChart] = useState(true); const { themedOptions, ds } = useChartTheme(darkMode);
+  useEffect(() => { let cancelled = false; (async () => { setLoading(true); setError(null); try { const sources = await getLogsByMultipleIds([2340, 2100]); const deposit = Array.isArray(sources.get(2340)) ? sources.get(2340).map(row => ({ ...row, direction: 'deposit' })) : []; const withdrawal = Array.isArray(sources.get(2100)) ? sources.get(2100).map(row => ({ ...row, direction: 'withdrawal' })) : []; if (!cancelled) setRows([...deposit, ...withdrawal].filter(validTimestamp)); } catch { if (!cancelled) { setRows([]); setError('Blood transactions are unavailable.'); } } finally { if (!cancelled) setLoading(false); } })(); return () => { cancelled = true; }; }, [logsUpdated]);
+  const buckets = useMemo(() => chartBuckets(rows, { getTimestamp: row => row.timestamp, getValues: row => [row.direction === 'deposit' ? 1 : 0, row.direction === 'withdrawal' ? 1 : 0] }), [rows]);
+  const data = useMemo(() => bucketChartData(buckets, [{ label: 'Deposit', data: buckets.map(b => b.sums[0]) }, { label: 'Withdrawal', data: buckets.map(b => -b.sums[1]) }], dateFrom, dateTo), [buckets, dateFrom, dateTo]);
+  useEffect(() => { notifyMinDate(buckets, onMinDate); }, [buckets, onMinDate]);
+  const deposits = data.datasets[0]?.data || []; const withdrawals = data.datasets[1]?.data || []; const totalWithdrawal = withdrawals.reduce((sum, value) => sum + Math.abs(toFiniteNumber(value) ?? 0), 0);
+  return <div className="my-4"><h5 style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setShowChart(v => !v)}>Blood transactions</h5>{loading ? <img src="/images/loader.gif" alt="Loading..." style={{ maxWidth: 80 }} /> : error ? <div className="text-muted">{error}</div> : !deposits.length && !withdrawals.length ? <div className="text-muted">No matching blood transactions.</div> : showChart && <><div style={{ height: chartHeight }}><Bar data={{ labels: data.labels, datasets: [ds('bar', 0, deposits, { label: 'Deposit' }), ds('bar', 1, withdrawals, { label: 'Withdrawal' })] }} options={themedOptions({ responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } })} /></div><InlineStat id="bloodTotalWithdrawals" label="Total withdrawals:" value={totalWithdrawal} /></>}</div>;
 }

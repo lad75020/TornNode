@@ -37,6 +37,11 @@ async function getAllLogsFromStore(db) {
   return db.getAll(LOGS_STORE_NAME);
 }
 
+export async function getAllLogs() {
+  const db = await getDB(LOGS_DB_NAME, LOGS_DB_VERSION, upgradeLogsDb);
+  return getAllLogsFromStore(db);
+}
+
 export function setLogsCacheTTL(ms) {
   logsCacheTTL = Math.max(0, Number(ms) || 0);
 }

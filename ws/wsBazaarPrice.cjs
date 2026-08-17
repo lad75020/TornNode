@@ -7,6 +7,13 @@ const REFRESH_MS = Number(process.env.REFRESH_MS || 30000);
 const SAFE_RPM = Math.min(Number(process.env.SAFE_RPM || 55), 59);
 const API_KEY = process.env.TORN_API_KEY;
 const { authorizeSocket } = require('../routes/wsHandler.cjs');
+const {
+  normalizeItemId,
+  normalizeListings,
+  findMinimumListing,
+} = require('../utils/bazaarMarket.cjs');
+const wsGetAllTornItems = require('./wsGetAllTornItems.cjs');
+const wsDailyPriceAverages = require('./wsDailyPriceAverages.cjs');
 const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
 const tornClient = new TornAPI({
   apiKeys: [API_KEY],
@@ -14,6 +21,13 @@ const tornClient = new TornAPI({
 });
 
 const dynamicWatchSet = new Set();
+const seededWatchSet = new Set();
+const itemSubscribers = new Map();
+const publicConnectionCounts = new Map();
+const PUBLIC_CONNECTION_LIMIT_PER_IP = 10;
+const PUBLIC_MESSAGE_LIMIT = 120;
+const PUBLIC_MESSAGE_WINDOW_MS = 60_000;
+const MAX_PUBLIC_SUBSCRIPTIONS = 50;
 
 
 const MIN_INTERVAL_MS = Math.ceil(60_000 / SAFE_RPM);
@@ -27,6 +41,95 @@ const lastBroadcastedMin = new Map();
 
 // IMPORTANT: plus de fastify ici
 let redis;                 // sera affecté dans le plugin
+
+const PUBLIC_BAZAAR_COMMANDS = new Set([
+  'ping',
+  'getAllTornItems',
+  'dailyPriceAveragesAll',
+]);
+
+function isPublicBazaarCommand(command) {
+  return typeof command === 'string' && PUBLIC_BAZAAR_COMMANDS.has(command);
+}
+
+function sendJson(socket, payload) {
+  try { socket.send(JSON.stringify(payload)); } catch (_) {}
+}
+
+function publicConnectionKey(request) {
+  return String(request?.ip || request?.socket?.remoteAddress || 'unknown');
+}
+
+function claimPublicConnection(request) {
+  const key = publicConnectionKey(request);
+  const current = publicConnectionCounts.get(key) || 0;
+  if (current >= PUBLIC_CONNECTION_LIMIT_PER_IP) return null;
+  publicConnectionCounts.set(key, current + 1);
+  return key;
+}
+
+function releasePublicConnection(key) {
+  if (!key) return;
+  const current = publicConnectionCounts.get(key) || 0;
+  if (current <= 1) publicConnectionCounts.delete(key);
+  else publicConnectionCounts.set(key, current - 1);
+}
+
+function allowPublicMessage(ws) {
+  const now = Date.now();
+  if (!Number.isFinite(ws.publicMessageWindowStart)
+    || now - ws.publicMessageWindowStart >= PUBLIC_MESSAGE_WINDOW_MS) {
+    ws.publicMessageWindowStart = now;
+    ws.publicMessageCount = 0;
+    ws.publicRateLimitNotified = false;
+  }
+  if (ws.publicMessageCount >= PUBLIC_MESSAGE_LIMIT) {
+    if (!ws.publicRateLimitNotified) {
+      ws.publicRateLimitNotified = true;
+      sendJson(ws, { type: 'error', ok: false, error: 'Too many public market requests. Please retry later.' });
+      try { ws.close(4429, 'rate limit exceeded'); } catch (_) {}
+    }
+    return false;
+  }
+  ws.publicMessageCount += 1;
+  return true;
+}
+
+function hasPublicSubscriptionCapacity(ws, itemId) {
+  return ws.bazaarSubscriptions.has(itemId)
+    || ws.bazaarSubscriptions.size < MAX_PUBLIC_SUBSCRIPTIONS;
+}
+
+function subscribeSocket(ws, itemId) {
+  if (!(ws.bazaarSubscriptions instanceof Set)) ws.bazaarSubscriptions = new Set();
+  ws.bazaarSubscriptions.add(itemId);
+  let subscribers = itemSubscribers.get(itemId);
+  if (!subscribers) {
+    subscribers = new Set();
+    itemSubscribers.set(itemId, subscribers);
+  }
+  subscribers.add(ws);
+  dynamicWatchSet.add(itemId);
+  // A new subscriber must receive the current value even when it did not change.
+  lastBroadcastedMin.delete(itemId);
+}
+
+function unsubscribeSocket(ws, itemId) {
+  ws.bazaarSubscriptions?.delete(itemId);
+  const subscribers = itemSubscribers.get(itemId);
+  subscribers?.delete(ws);
+  if (subscribers && subscribers.size === 0) itemSubscribers.delete(itemId);
+  if (!seededWatchSet.has(itemId) && !itemSubscribers.has(itemId)) {
+    dynamicWatchSet.delete(itemId);
+  }
+}
+
+function cleanupSocketSubscriptions(ws) {
+  for (const itemId of Array.from(ws.bazaarSubscriptions || [])) {
+    unsubscribeSocket(ws, itemId);
+  }
+  ws.bazaarSubscriptions?.clear();
+}
 
 function enqueue(task) {
   return new Promise((resolve, reject) => {
@@ -59,10 +162,7 @@ async function getBazaarListings(fastify, itemId) {
   const listings = Array.isArray(listingsRaw)
     ? listingsRaw
     : (listingsRaw && typeof listingsRaw === 'object' ? [listingsRaw] : []);
-  const mapped = listings.map(l => ({
-    price: Number(l.price),
-    quantity: Number(l.amount)
-  })).filter(l => Number.isFinite(l.price) && l.price > 0);
+  const mapped = normalizeListings(listings);
   if (!mapped.length) {
     fastify.log.warn(`[wsBazaarPrice] No listings for item ${itemId}`);
   }
@@ -74,9 +174,9 @@ async function fetchListingsAndMin(fastify, itemId) {
   while (attempt < 4) {
     try {
   const listings = await enqueue(() => getBazaarListings(fastify, itemId));
-      if (!listings.length) return { minPrice: null, listings: [] };
-      const minPrice = listings.reduce((m, l) => l.price < m ? l.price : m, Infinity);
-      return { minPrice: isFinite(minPrice) ? minPrice : null, listings };
+  if (!listings.length) return { minPrice: null, listings: [] };
+  const minimum = findMinimumListing(listings);
+  return { minPrice: minimum ? minimum.price : null, listings };
     } catch (e) {
       attempt++;
       if (attempt < 4) {
@@ -95,7 +195,10 @@ function broadcast(fastify, msg) {
   if (!fastify.websocketServer) return;
   const payload = JSON.stringify(msg);
   fastify.websocketServer.clients.forEach(c => {
-    if (c.readyState === 1 && c.isBazaar) {
+    const itemId = normalizeItemId(msg.itemId);
+    const subscribed = itemId === null
+      || (c.bazaarSubscriptions instanceof Set && c.bazaarSubscriptions.has(itemId));
+    if (c.readyState === 1 && c.isBazaar && subscribed) {
       try { c.send(payload); } catch(e){ fastify.log.error(`[wsBazaarPrice] broadcast error ${e.message}`); }
     }
   });
@@ -154,7 +257,7 @@ async function cycle(fastify) {
       continue;
     }
 
-  const minListing = listings.reduce((m, l) => l.price < m.price ? l : m, listings[0]);
+    const minListing = findMinimumListing(listings);
     // Mise à jour des stores si variation détectée
     if (typeof minPrice === 'number' && isFinite(minPrice)) {
       const prev = lastMinPrices.get(id);
@@ -296,7 +399,13 @@ async function seedWatchSetFromMongo(fastify) {
     while (await cursor.hasNext()) {
       const doc = await cursor.next();
       scanned++;
-      if (doc && typeof doc.id === 'number' && !dynamicWatchSet.has(doc.id)) { dynamicWatchSet.add(doc.id); added++; }
+      const itemId = normalizeItemId(doc?.id);
+      if (itemId !== null) {
+        const wasPresent = dynamicWatchSet.has(itemId);
+        dynamicWatchSet.add(itemId);
+        seededWatchSet.add(itemId);
+        if (!wasPresent) added++;
+      }
       // Yield occasionnel pour ne pas monopoliser l'event loop si dataset massif
       if (scanned % 500 === 0) await sleep(0);
     }
@@ -316,11 +425,29 @@ async function plugin(fastify, opts) {
     return; // on ne lance pas la suite
   }
 
-  fastify.get('/wsb', { websocket: true }, async (conn, req) => {
+  fastify.get('/wsb', {
+    websocket: true,
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (conn, req) => {
     const ws = conn.socket || conn;
-    if (!await authorizeSocket(fastify, ws, req)) return;
-    fastify.authSessions.registerSocket?.(req, ws);
+    const connectionKey = claimPublicConnection(req);
+    if (connectionKey === null) {
+      try { ws.close(4429, 'too many public connections'); } catch (_) {}
+      return;
+    }
+    if (!await authorizeSocket(fastify, ws, req, { allowAnonymous: true })) {
+      releasePublicConnection(connectionKey);
+      return;
+    }
+    ws.publicConnectionKey = connectionKey;
+    fastify.authSessions?.registerSocket?.(req, ws);
     ws.isBazaar = true;
+    ws.bazaarSubscriptions = new Set();
     // Stocker req pour accéder à la session (clé API utilisateur)
   // plus besoin de stocker la requête pour la clé API (clé globale utilisée)
     const PING_INTERVAL = parseInt(process.env.WSB_PING_INTERVAL_MS || '30000');
@@ -328,7 +455,7 @@ async function plugin(fastify, opts) {
     let lastPong = Date.now();
     try {
       ws.send(JSON.stringify({ type:'welcome', time:Date.now() }));
-      ws.send(JSON.stringify({ type:'watchList', items:Array.from(dynamicWatchSet) }));
+      ws.send(JSON.stringify({ type:'watchList', items:[] }));
     } catch(e){}
     const pingInt = setInterval(() => {
       if (ws.readyState === 1) {
@@ -343,30 +470,71 @@ async function plugin(fastify, opts) {
     }, PING_INTERVAL);
 
     ws.on('message', async raw => {
-      if (!await authorizeSocket(fastify, ws, req)) return;
+      if (!allowPublicMessage(ws)) return;
+      if (!await authorizeSocket(fastify, ws, req, { allowAnonymous: true })) return;
+      const text = typeof raw === 'string' ? raw : raw?.toString?.() || '';
+      const command = text.trim();
+      if (command === 'ping') {
+        try { ws.send('pong'); } catch (_) {}
+        return;
+      }
+      if (command === 'getAllTornItems' && isPublicBazaarCommand(command)) {
+        await wsGetAllTornItems.getPublicCatalog(ws, fastify);
+        return;
+      }
+      if (command === 'dailyPriceAveragesAll' && isPublicBazaarCommand(command)) {
+        await wsDailyPriceAverages(ws, req, fastify);
+        return;
+      }
       let msg;
-      try { msg = JSON.parse(raw); } catch { return; }
+      try { msg = JSON.parse(text); } catch { return; }
       if (!msg || typeof msg !== 'object') return;
-      if (msg.type === 'watch' && Number.isFinite(msg.itemId) && msg.itemId > 0) {
-        if (!dynamicWatchSet.has(msg.itemId)) {
-          dynamicWatchSet.add(msg.itemId);
-          fastify.log.info(`[wsBazaarPrice] watch add ${msg.itemId}`);
-          try { ws.send(JSON.stringify({ type:'watchAck', itemId:msg.itemId, total:dynamicWatchSet.size })); } catch(_){}
+      if (msg.type === 'ping') {
+        try { ws.send('pong'); } catch (_) {}
+        return;
+      }
+      if (msg.type === 'watch' || msg.type === 'unwatch') {
+        const itemId = normalizeItemId(msg.itemId);
+        if (itemId === null) return;
+        if (msg.type === 'watch') {
+          const already = ws.bazaarSubscriptions.has(itemId);
+          if (!hasPublicSubscriptionCapacity(ws, itemId)) {
+            sendJson(ws, {
+              type: 'watchAck',
+              ok: false,
+              itemId,
+              error: 'Public watch limit reached.',
+              total: ws.bazaarSubscriptions.size,
+            });
+            return;
+          }
+          subscribeSocket(ws, itemId);
+          fastify.log.info(`[wsBazaarPrice] watch ${already ? 'already ' : ''}add ${itemId}`);
+          sendJson(ws, { type:'watchAck', itemId, ...(already ? { already:true } : {}), total:ws.bazaarSubscriptions.size });
         } else {
-          try { ws.send(JSON.stringify({ type:'watchAck', itemId:msg.itemId, already:true, total:dynamicWatchSet.size })); } catch(_){}
+          const subscribed = ws.bazaarSubscriptions.has(itemId);
+          unsubscribeSocket(ws, itemId);
+          fastify.log.info(`[wsBazaarPrice] watch remove ${itemId}`);
+          sendJson(ws, { type:'unwatchAck', itemId, ...(subscribed ? {} : { missing:true }), total:ws.bazaarSubscriptions.size });
         }
-      } else if (msg.type === 'unwatch' && Number.isFinite(msg.itemId) && msg.itemId > 0) {
-        if (dynamicWatchSet.delete(msg.itemId)) {
-          fastify.log.info(`[wsBazaarPrice] watch remove ${msg.itemId}`);
-          try { ws.send(JSON.stringify({ type:'unwatchAck', itemId:msg.itemId, total:dynamicWatchSet.size })); } catch(_){}
-        } else {
-          try { ws.send(JSON.stringify({ type:'unwatchAck', itemId:msg.itemId, missing:true, total:dynamicWatchSet.size })); } catch(_){}
-        }
+        return;
+      }
+      if (msg.type === 'getAllTornItems' && isPublicBazaarCommand(msg.type)) {
+        await wsGetAllTornItems.getPublicCatalog(ws, fastify);
+        return;
+      }
+      if (msg.type === 'dailyPriceAveragesAll' && isPublicBazaarCommand(msg.type)) {
+        await wsDailyPriceAverages(ws, req, fastify);
       }
     });
 
   ws.on('pong', () => { lastPong = Date.now(); });
-  ws.on('close', () => clearInterval(pingInt));
+  ws.on('close', () => {
+    clearInterval(pingInt);
+    cleanupSocketSubscriptions(ws);
+    releasePublicConnection(ws.publicConnectionKey);
+    ws.publicConnectionKey = null;
+  });
     ws.on('error', err => fastify.log.error('[wsBazaarPrice] socket error '+err.message));
   });
 
@@ -401,3 +569,12 @@ async function plugin(fastify, opts) {
 }
 
 module.exports = fastifyPlugin(plugin);
+module.exports.isPublicBazaarCommand = isPublicBazaarCommand;
+module.exports.normalizeItemId = normalizeItemId;
+module.exports.claimPublicConnection = claimPublicConnection;
+module.exports.releasePublicConnection = releasePublicConnection;
+module.exports.allowPublicMessage = allowPublicMessage;
+module.exports.hasPublicSubscriptionCapacity = hasPublicSubscriptionCapacity;
+module.exports.PUBLIC_CONNECTION_LIMIT_PER_IP = PUBLIC_CONNECTION_LIMIT_PER_IP;
+module.exports.PUBLIC_MESSAGE_LIMIT = PUBLIC_MESSAGE_LIMIT;
+module.exports.MAX_PUBLIC_SUBSCRIPTIONS = MAX_PUBLIC_SUBSCRIPTIONS;

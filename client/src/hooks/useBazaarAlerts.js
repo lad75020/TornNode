@@ -1,84 +1,176 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import usePersistentState from './usePersistentState.js';
+import {
+  evaluateThreshold,
+  normalizeItemId,
+  normalizePriceUpdate,
+  sanitizeThresholds,
+  sanitizeWatchedItems,
+} from '../../../utils/bazaarMarket.cjs';
 
 function notifyPriceDrop(itemId, name, price, threshold) {
-  if (typeof window === 'undefined') return;
-  const body = `${name || itemId} à ${price.toLocaleString()} (≤ ${threshold.toLocaleString()})`;
+  if (typeof window === 'undefined') return false;
+  const safePrice = Number(price);
+  const safeThreshold = Number(threshold);
+  const body = `${name || itemId} à ${safePrice.toLocaleString()} (≤ ${safeThreshold.toLocaleString()})`;
   let delivered = false;
   if ('Notification' in window) {
     try {
       if (Notification.permission === 'granted') {
-        new Notification('Bazaar: prix en baisse', { body, tag: 'bazaar-price-'+itemId });
+        new Notification('Bazaar: prix en baisse', { body, tag: `bazaar-price-${itemId}` });
         delivered = true;
       } else if (Notification.permission === 'default') {
-        Notification.requestPermission().then(p => { if (p === 'granted') { try { new Notification('Bazaar: prix en baisse', { body, tag: 'bazaar-price-'+itemId }); } catch {} } });
+        Notification.requestPermission().then(permission => {
+          if (permission === 'granted') {
+            try {
+              new Notification('Bazaar: prix en baisse', {
+                body,
+                tag: `bazaar-price-${itemId}`,
+              });
+            } catch (_) {}
+          }
+        }).catch(() => {});
       }
-    } catch {}
+    } catch (_) {}
   }
   return delivered;
 }
 
-export default function useBazaarAlerts(wsBazaarMessages) {
-  const [watchedItems, setWatchedItems] = usePersistentState('watchedItems', []);
-  const [priceThresholds, setPriceThresholds] = usePersistentState('priceThresholds', {});
+function parseMessage(raw) {
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export default function useBazaarAlerts(wsBazaarMessages = []) {
+  const [storedWatchedItems, setStoredWatchedItems] = usePersistentState('watchedItems', []);
+  const [storedPriceThresholds, setStoredPriceThresholds] = usePersistentState('priceThresholds', {});
   const [bazaarRows, setBazaarRows] = useState([]);
-  const [blinkingItems, setBlinkingItems] = useState(new Set());
+  const [blinkingItems, setBlinkingItems] = useState(() => new Set());
+
+  const watchedItems = sanitizeWatchedItems(storedWatchedItems);
+  const priceThresholds = sanitizeThresholds(storedPriceThresholds);
+  const watchedItemsRef = useRef(watchedItems);
   const thresholdsRef = useRef(priceThresholds);
   const triggeredRef = useRef(new Set());
-  const localInitRef = useRef(true);
+  const latestTimeRef = useRef(new Map());
+  const lastMessageRef = useRef(null);
+  const blinkTimersRef = useRef(new Map());
 
-  useEffect(() => { thresholdsRef.current = priceThresholds; }, [priceThresholds]);
+  const setWatchedItems = useCallback((next) => {
+    setStoredWatchedItems(previous => {
+      const current = sanitizeWatchedItems(previous);
+      const candidate = typeof next === 'function' ? next(current) : next;
+      return sanitizeWatchedItems(candidate);
+    });
+  }, [setStoredWatchedItems]);
+
+  const setPriceThresholds = useCallback((next) => {
+    setStoredPriceThresholds(previous => {
+      const current = sanitizeThresholds(previous);
+      const candidate = typeof next === 'function' ? next(current) : next;
+      return sanitizeThresholds(candidate);
+    });
+  }, [setStoredPriceThresholds]);
 
   useEffect(() => {
-    if (!wsBazaarMessages.length) return;
-    const last = wsBazaarMessages[wsBazaarMessages.length - 1];
-    let payload;
-    try { payload = JSON.parse(last); } catch { return; }
-    if (!payload || typeof payload !== 'object') return;
-    if (payload.type === 'priceUpdate' && Array.isArray(payload.listings)) {
-      const ts = payload.time || Date.now();
-      const newRows = payload.listings.map(l => ({
-        time: ts,
-        itemId: payload.itemId,
-        itemName: payload.itemName || '',
-        price: l.price,
-        quantity: l.quantity,
-        seller: l.seller
-      }));
-      setBazaarRows(prev => {
-        const incomingIds = new Set(newRows.map(r => r.itemId));
-        const filtered = prev.filter(r => !incomingIds.has(r.itemId));
-        return [...newRows, ...filtered];
-      });
-      newRows.forEach(r => {
-        const threshold = Number(thresholdsRef.current[r.itemId] || 0);
-        if (threshold > 0 && typeof r.price === 'number' && r.price <= threshold) {
-          if (!triggeredRef.current.has(r.itemId)) {
-            triggeredRef.current.add(r.itemId);
-            setBlinkingItems(prev => { const s = new Set(prev); s.add(r.itemId); return s; });
-            setTimeout(() => setBlinkingItems(prev => { const s = new Set(prev); s.delete(r.itemId); return s; }), 5000);
-            notifyPriceDrop(r.itemId, r.itemName, r.price, threshold);
-          }
-        } else if (threshold > 0 && typeof r.price === 'number' && r.price > threshold) {
-          if (triggeredRef.current.has(r.itemId)) triggeredRef.current.delete(r.itemId);
-        }
-      });
-    } else if (payload.type === 'watchList' && Array.isArray(payload.items)) {
-      // première synchro uniquement la première fois, sinon on respecte serveur (peut refléter nettoyages)
-      if (localInitRef.current) {
-        const serverSet = new Set(payload.items.filter(n => Number.isFinite(n)));
-        const merged = Array.from(new Set([...watchedItems, ...serverSet]));
-        setWatchedItems(merged);
-        localInitRef.current = false;
-      } else {
-        setWatchedItems(payload.items.filter(n => Number.isFinite(n)));
-      }
-    } else if (payload.type === 'watchAck' && Number.isFinite(payload.itemId)) {
-      setWatchedItems(prev => prev.includes(payload.itemId) ? prev : [...prev, payload.itemId]);
-    } else if (payload.type === 'unwatchAck' && Number.isFinite(payload.itemId)) {
-      if (!payload.missing) setWatchedItems(prev => prev.filter(id => id !== payload.itemId));
+    watchedItemsRef.current = watchedItems;
+    const watchedSet = new Set(watchedItems);
+    setBazaarRows(previous => previous.filter(row => watchedSet.has(row.itemId)));
+    for (const itemId of Array.from(triggeredRef.current)) {
+      if (!watchedSet.has(itemId)) triggeredRef.current.delete(itemId);
     }
-  }, [wsBazaarMessages, watchedItems, setWatchedItems]);
+  }, [watchedItems]);
+
+  useEffect(() => {
+    thresholdsRef.current = priceThresholds;
+  }, [priceThresholds]);
+
+  useEffect(() => () => {
+    for (const timer of blinkTimersRef.current.values()) clearTimeout(timer);
+    blinkTimersRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    if (!Array.isArray(wsBazaarMessages) || wsBazaarMessages.length === 0) return;
+    const raw = wsBazaarMessages[wsBazaarMessages.length - 1];
+    if (raw === lastMessageRef.current) return;
+    lastMessageRef.current = raw;
+
+    const payload = parseMessage(raw);
+    if (!payload) return;
+
+    if (payload.type === 'watchList' && Array.isArray(payload.items)) {
+      // The server list is scoped to this socket. Merge it without allowing a
+      // reconnect's empty initial list to erase locally persisted watches.
+      setWatchedItems(previous => [...previous, ...payload.items]);
+      return;
+    }
+
+    const acknowledgedId = normalizeItemId(payload.itemId);
+    if (payload.type === 'watchAck' && acknowledgedId !== null) {
+      setWatchedItems(previous => [...previous, acknowledgedId]);
+      return;
+    }
+    if (payload.type === 'unwatchAck' && acknowledgedId !== null && !payload.missing) {
+      setWatchedItems(previous => previous.filter(itemId => itemId !== acknowledgedId));
+      return;
+    }
+
+    const update = normalizePriceUpdate(payload);
+    if (!update || !watchedItemsRef.current.includes(update.itemId)) return;
+
+    const previousTime = latestTimeRef.current.get(update.itemId);
+    if (previousTime !== undefined && update.time <= previousTime) return;
+    latestTimeRef.current.set(update.itemId, update.time);
+
+    if (update.listings.length > 0) {
+      const minimum = update.listings[0];
+      const row = {
+        time: update.time,
+        itemId: update.itemId,
+        itemName: update.itemName,
+        price: minimum.price,
+        quantity: minimum.quantity,
+        ...(minimum.seller ? { seller: minimum.seller } : {}),
+      };
+      setBazaarRows(previous => [row, ...previous.filter(item => item.itemId !== row.itemId)]);
+
+      const threshold = thresholdsRef.current[update.itemId];
+      const decision = evaluateThreshold({
+        minimum: update.minBazaar,
+        threshold,
+        triggered: triggeredRef.current.has(update.itemId),
+      });
+      if (decision.recovered) triggeredRef.current.delete(update.itemId);
+      if (decision.trigger) {
+        triggeredRef.current.add(update.itemId);
+        setBlinkingItems(previous => {
+          const next = new Set(previous);
+          next.add(update.itemId);
+          return next;
+        });
+        const existingTimer = blinkTimersRef.current.get(update.itemId);
+        if (existingTimer) clearTimeout(existingTimer);
+        const timer = setTimeout(() => {
+          blinkTimersRef.current.delete(update.itemId);
+          setBlinkingItems(previous => {
+            const next = new Set(previous);
+            next.delete(update.itemId);
+            return next;
+          });
+        }, 5000);
+        blinkTimersRef.current.set(update.itemId, timer);
+        notifyPriceDrop(update.itemId, update.itemName, update.minBazaar, threshold);
+      }
+    }
+    // Empty or invalid listings intentionally preserve the previous row and
+    // alert episode. Only a valid minimum strictly above the threshold resets.
+  }, [setWatchedItems, wsBazaarMessages]);
 
   return {
     watchedItems,
@@ -86,6 +178,6 @@ export default function useBazaarAlerts(wsBazaarMessages) {
     priceThresholds,
     setPriceThresholds,
     bazaarRows,
-    blinkingItems
+    blinkingItems,
   };
 }

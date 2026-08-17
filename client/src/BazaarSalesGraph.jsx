@@ -23,10 +23,13 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
+      try {
       const db = await openDB('LogsDB');
       const storeName = 'logs';
       if (!db.objectStoreNames.contains(storeName)) {
-        setLoading(false);
+        setChartData({ labels: [], datasets: [] });
+        setBucketLogs({});
+        setTotalSum(0);
         return;
       }
       const index = db.transaction(storeName).store.index('log');
@@ -44,8 +47,13 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
       }
 
       for (const obj of all) {
-        if (obj.data && typeof obj.data.cost_total === 'number' && typeof obj.timestamp === 'number') {
+        if (obj?.data
+          && Number.isFinite(obj.data.cost_total)
+          && obj.data.cost_total >= 0
+          && Number.isFinite(obj.timestamp)
+          && obj.timestamp > 0) {
           const d = new Date(obj.timestamp * 1000);
+          if (!Number.isFinite(d.getTime()) || d.getTime() > Date.now()) continue;
           let key, sortKey;
           if (granularity === 'day') {
             key = d.toISOString().slice(0,10);
@@ -129,10 +137,16 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
       const filtered = granularity === 'day' ? filterDatasetsByDate(labels, datasets, dateFrom, dateTo) : { labels, datasets };
       setChartData(filtered);
       setBucketLogs(bucketMap);
-      setLoading(false);
+      } catch (_) {
+        setChartData({ labels: [], datasets: [] });
+        setBucketLogs({});
+        setTotalSum(0);
+      } finally {
+        setLoading(false);
+      }
     }
     fetchData();
-  }, [logsUpdated, granularity]);
+  }, [dateFrom, dateTo, granularity, logsUpdated, onMinDate, ds]);
 
   return (
     <div className="my-4">
@@ -150,6 +164,11 @@ export default function BazaarSalesGraph({ logsUpdated, darkMode, chartHeight = 
       ) : (
         showChart && (
           <>
+            {!chartData.labels?.length && (
+              <div role="status" style={{ marginBottom: 8, opacity: 0.75 }}>
+                No bazaar sales history is available for the selected range.
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '8px', height: chartHeight }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div className="btn-group-vertical" role="group" aria-label="Granularity">

@@ -41,7 +41,7 @@ function normalizeDateInput(raw) {
   return { ts: NaN, day: null };
 }
 
-export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, darkMode, onMinDate, dateFrom, dateTo }) {
+export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, darkMode, onMinDate, dateFrom, dateTo, allowBuild = true }) {
   const [lines, setLines] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [attemptedBuild, setAttemptedBuild] = useState(false);
@@ -73,7 +73,7 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, 
           setSelectedId(parsed.lines[0].id);
         }
         // Si aucune donnée et pas encore tenté, demander un build côté serveur puis relire
-        if ((!parsed.lines || parsed.lines.length === 0) && !attemptedBuild) {
+        if (allowBuild && (!parsed.lines || parsed.lines.length === 0) && !attemptedBuild) {
           try { sendWs && sendWs(JSON.stringify({ type: 'dailyPriceAverage' })); } catch {}
           setAttemptedBuild(true);
         }
@@ -82,7 +82,7 @@ export default function DailyPriceAveragesChart({ wsMessages, sendWs, wsStatus, 
         try { sendWs && sendWs('dailyPriceAveragesAll'); } catch {}
       }
     } catch(_) {}
-  }, [wsMessages, attemptedBuild, sendWs, selectedId]);
+  }, [allowBuild, wsMessages, attemptedBuild, sendWs, selectedId]);
 
   const allPoints = useMemo(() => {
     const pts = [];

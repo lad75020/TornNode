@@ -113,12 +113,12 @@ features:
       - "client/src/BazaarSalesGraph.jsx"
       - "client/src/DailyPriceAveragesChart.jsx"
       - "client/src/PublicBazaarPage.jsx"
-    status: pending # pending | in-progress | done | skipped
+    status: done # pending | in-progress | done | skipped
     current_phase: null # null | specify | clarify | plan | tasks | implement
-    branch: null
-    pushed: null # null | true | false
-    started_at: null
-    completed_at: null
+    branch: "feature/time-machine-bazaar-monitoring"
+    pushed: true # null | true | false
+    started_at: "2026-08-17T20:44:40Z"
+    completed_at: "2026-08-17T21:15:20Z"
 
   - id: "combat-and-progression-analytics"
     name: "Combat and Progression Analytics"

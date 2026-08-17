@@ -16,7 +16,8 @@ function normalizeUserId(rawUserId) {
     return Number.isFinite(numeric) ? numeric : text;
 }
 
-async function authorizeSocket(fastify, socket, request, { checkSession = false } = {}) {
+async function authorizeSocket(fastify, socket, request, { checkSession = false, allowAnonymous = false } = {}) {
+    if (allowAnonymous) return true;
     let result;
     try { result = await fastify.authSessions.validateAndRenew(request); } catch (_) { result = { ok: false }; }
     if (result.ok) return true;

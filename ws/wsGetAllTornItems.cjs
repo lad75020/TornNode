@@ -14,6 +14,8 @@ const {
 
 const CACHE_TTL_SECONDS = 86400;
 const CACHE_CHUNK_SIZE = 200;
+const PUBLIC_RESPONSE_CACHE_TTL_MS = 30_000;
+const publicCatalogCache = new WeakMap();
 
 function isCompleteItem(item) {
   if (!item || typeof item !== 'object') return false;
@@ -126,6 +128,54 @@ async function writeCachedItems(redisClient, documents, fastify) {
   }
 }
 
+function toPublicItem(item) {
+  if (!isCompleteItem(item)) return null;
+  const publicItem = {
+    id: parseInteger(item.id),
+    name: item.name,
+    price: Number(item.price),
+    img64: item.img64,
+    description: item.description,
+  };
+  if (typeof item.type === 'string' && item.type.trim()) publicItem.type = item.type.trim();
+  return publicItem;
+}
+
+async function getPublicCatalog(socket, fastify) {
+  try {
+    const cacheOwner = typeof fastify === 'object' && fastify !== null ? fastify : null;
+    if (cacheOwner) {
+      const cached = publicCatalogCache.get(cacheOwner);
+      if (cached && Date.now() - cached.cachedAt < PUBLIC_RESPONSE_CACHE_TTL_MS) {
+        sendJson(socket, { type: 'getAllTornItems', ok: true, items: cached.items });
+        return;
+      }
+    }
+
+    const redisClient = fastify && fastify.redis;
+    let items = null;
+    try { items = await readCachedItems(redisClient); } catch (error) {
+      logMessage(fastify, 'warn', 'public item catalog cache read failed', { error: error.message });
+    }
+
+    if (!items || items.length === 0) {
+      const database = getCatalogDatabase(fastify);
+      const documents = await database.collection('Items')
+        .find({}, { projection: { _id: 0, id: 1, name: 1, price: 1, img64: 1, description: 1, type: 1 } })
+        .toArray();
+      items = documents;
+    }
+
+    const publicItems = Array.isArray(items) ? items.map(toPublicItem).filter(Boolean) : [];
+    if (publicItems.length === 0) throw new Error('public item catalog is empty');
+    if (cacheOwner) publicCatalogCache.set(cacheOwner, { cachedAt: Date.now(), items: publicItems });
+    sendJson(socket, { type: 'getAllTornItems', ok: true, items: publicItems });
+  } catch (error) {
+    logMessage(fastify, 'warn', 'public item catalog request failed', { error: error.message });
+    sendJson(socket, { type: 'getAllTornItems', ok: false, error: SAFE_ERRORS.ITEM_CATALOG_FAILED });
+  }
+}
+
 module.exports = async function wsGetAllTornItems(socket, req, fastify) {
   const session = getAuthenticatedSession(req, { requireApiKey: true });
   if (!session.ok) {
@@ -161,3 +211,5 @@ module.exports = async function wsGetAllTornItems(socket, req, fastify) {
 module.exports.isCompleteItem = isCompleteItem;
 module.exports.parseRedisItem = parseRedisItem;
 module.exports.readCachedItems = readCachedItems;
+module.exports.getPublicCatalog = getPublicCatalog;
+module.exports.toPublicItem = toPublicItem;

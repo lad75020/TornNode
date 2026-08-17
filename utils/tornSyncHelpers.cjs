@@ -10,6 +10,7 @@ const SAFE_ERRORS = Object.freeze({
   ATTACK_RETRIEVAL_FAILED: 'Attack retrieval could not be completed. Please retry.',
   ITEM_CATALOG_FAILED: 'Item catalog could not be loaded. Please retry.',
   ITEM_PRICE_UPDATE_FAILED: 'Item price could not be updated. Please retry.',
+  MARKET_HISTORY_FAILED: 'Market history could not be loaded. Please retry.',
   SOCKET_UNUSABLE: 'The connection is no longer available.',
 });
 

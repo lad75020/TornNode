@@ -91,7 +91,14 @@ export default function BazaarTable({
     }
   }, [priceChanges, bazaarRows, watchedItems]);
   const rows = bazaarRows.filter(r => watchedItems.includes(r.itemId));
-  if (!rows.length) return null;
+  if (!rows.length) {
+    if (!watchedItems.length) return null;
+    return (
+      <div role="status" style={{ marginBottom: 16, opacity: 0.75 }}>
+        No current bazaar listing is available for the watched items.
+      </div>
+    );
+  }
   return (
     <div className="mb-4">
       <h5>Market Lowest price</h5>
@@ -110,8 +117,11 @@ export default function BazaarTable({
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const threshold = Number(priceThresholds[r.itemId] || 0);
-              const alert = r.price < threshold && threshold > 0;
+              const threshold = Number(priceThresholds[r.itemId]);
+              const alert = Number.isFinite(r.price)
+                && Number.isFinite(threshold)
+                && threshold > 0
+                && r.price <= threshold;
               return (
                 <tr key={i} className={(alert ? 'bazaar-alert ' : '') + (blinkingItems.has(r.itemId) ? 'bazaar-blink' : '')}>
                   <td>
@@ -143,8 +153,13 @@ export default function BazaarTable({
                       pattern="[0-9]*"
                       value={priceThresholds[r.itemId] ?? 0}
                       onChange={(e) => {
-                        const digits = (e.target.value || '').replace(/\D+/g,'');
-                        onThresholdChange(r.itemId, digits === '' ? 0 : Number(digits));
+                        const raw = (e.target.value || '').trim();
+                        const numeric = Number(raw);
+                        const invalid = raw === ''
+                          || raw.startsWith('-')
+                          || !Number.isFinite(numeric)
+                          || numeric <= 0;
+                        onThresholdChange(r.itemId, invalid ? 0 : numeric);
                       }}
                       style={{ width: '100%', fontSize: 11, padding: 2, textAlign:'right' }}
                     />

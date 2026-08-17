@@ -73,6 +73,7 @@
     "build": "npm run build:static",
     "build:static": "vite build && rm -rf client/dist/assets client/dist/index.html public/assets public/client public/vite.config.json && cp -r client/dist/client/* client/dist/ && cp -r client/dist/client/* public/",
     "test:auth": "node --test tests/session-helper.test.cjs tests/session-rolling-expiry.test.cjs tests/authentication-login.test.cjs tests/authentication-denial.test.cjs tests/authentication-dependencies.test.cjs tests/authentication-cooldown.test.cjs tests/protected-routes.test.cjs tests/public-market-boundary.test.cjs tests/websocket-auth-upgrade.test.cjs tests/websocket-auth-commands.test.cjs tests/logout-http.test.cjs tests/websocket-logout.test.cjs tests/authentication-security.test.cjs",
+    "test:bazaar": "node --test tests/bazaar-market.test.cjs tests/ws-bazaar-market.test.cjs tests/public-bazaar-websocket.test.cjs tests/public-market-boundary.test.cjs",
     "test:auth:browser": "EXPO_SKIP_SERVER=1 playwright test client/tests/authentication-sessions.spec.ts --config client/playwright.config.js",
     "memory:index": "MEMORY_MCP_DISABLE_LEGACY_PUSH=1 node scripts/buildMemoryIndex.js && node scripts/pushMemoryMcp.js",
     "memory:entities": "node scripts/generateAllEntitiesInput.js",

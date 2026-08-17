@@ -1,115 +1,115 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useChartTheme from './useChartTheme.js';
-import { openDB } from 'idb';
+import { getLogsByLogId } from './dbLayer.js';
 import { Scatter } from 'react-chartjs-2';
 
-// Helper to assign a color to each crime type
-const colorMap = {};
-const getColor = (crime) => {
-  if (!colorMap[crime]) {
-    // Generate a random color for each unique crime
-    colorMap[crime] = `hsl(${Object.keys(colorMap).length * 47 % 360}, 70%, 55%)`;
-  }
-  return colorMap[crime];
-};
+const colorMap = new Map();
+function toTimestampMs(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = seconds * 1000;
+  return Number.isFinite(new Date(milliseconds).getTime()) ? milliseconds : null;
+}
+
+function getColor(crime) {
+  if (!colorMap.has(crime)) colorMap.set(crime, `hsl(${(colorMap.size * 47) % 360}, 70%, 55%)`);
+  return colorMap.get(crime);
+}
+
+function inDateRange(timestamp, dateFrom, dateTo) {
+  const day = new Date(timestamp).toISOString().slice(0, 10);
+  if (dateFrom && dateTo && dateFrom > dateTo) return false;
+  return (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo);
+}
 
 export default function CrimeScatterGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
-  const [chartData, setChartData] = useState({ datasets: [] });
+  const [pointsByCrime, setPointsByCrime] = useState({});
+  const [status, setStatus] = useState('loading');
   const [showChart, setShowChart] = useState(true);
   const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
-    async function fetchData() {
-      const db = await openDB('LogsDB');
-      const storeName = 'logs';
-      if (!db.objectStoreNames.contains(storeName)) return;
-      const index = db.transaction(storeName).store.index('log');
-      const all = await index.getAll(9005);
-      const pointsByCrime = {};
-      for (const obj of all) {
-        const crime = obj.data && obj.data.crime ? obj.data.crime : 'unknown';
-        const skill = obj.data && typeof obj.data.skill_level === 'number' ? obj.data.skill_level : null;
-        if (skill !== null) {
-          if (!pointsByCrime[crime]) pointsByCrime[crime] = [];
-          // Convert seconds to milliseconds for Chart.js time scale
-          pointsByCrime[crime].push({ x: obj.timestamp * 1000, y: skill });
-        }
+    let cancelled = false;
+    setStatus('loading');
+    (async () => {
+      let entries = [];
+      try { entries = await getLogsByLogId(9005); } catch (_) { entries = []; }
+      const grouped = {};
+      for (const entry of entries) {
+        const timestamp = toTimestampMs(entry?.timestamp);
+        const skill = entry?.data?.skill_level;
+        if (timestamp === null || typeof skill !== 'number' || !Number.isFinite(skill)) continue;
+        const rawCrime = typeof entry?.data?.crime === 'string' ? entry.data.crime.trim() : '';
+        const crime = rawCrime || 'unknown';
+        if (!grouped[crime]) grouped[crime] = [];
+        grouped[crime].push({ x: timestamp, y: skill });
       }
-      // Determine global earliest timestamp (for min date persistence)
-      let earliestTs = null;
-      for (const arr of Object.values(pointsByCrime)) {
-        for (const p of arr) {
-          if (earliestTs === null || p.x < earliestTs) earliestTs = p.x;
-        }
+      Object.values(grouped).forEach(points => points.sort((left, right) => left.x - right.x));
+      if (cancelled) return;
+      setPointsByCrime(grouped);
+      const earliest = Object.values(grouped).flat().sort((left, right) => left.x - right.x)[0];
+      if (earliest && onMinDate) {
+        try { onMinDate(new Date(earliest.x).toISOString().slice(0, 10)); } catch (_) {}
       }
-      if (earliestTs && onMinDate) {
-        const day = new Date(earliestTs).toISOString().slice(0,10);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(day)) { try { onMinDate(day); } catch {} }
+      setStatus(Object.keys(grouped).length ? 'ready' : 'empty');
+    })().catch(() => {
+      if (!cancelled) {
+        setPointsByCrime({});
+        setStatus('error');
       }
-      // Prepare datasets for each crime with date range filtering (day-based)
-      const datasets = Object.entries(pointsByCrime).map(([crime, points], idx) => {
-        // Trier par timestamp pour que la ligne connecte dans l'ordre temporel
-        points.sort((a,b) => a.x - b.x);
-        const filteredPoints = (dateFrom || dateTo) ? points.filter(p => {
-          const day = new Date(p.x).toISOString().slice(0,10);
-          if (dateFrom && day < dateFrom) return false;
-          if (dateTo && day > dateTo) return false;
-          return true;
-        }) : points;
-        const color = getColor(crime);
-        return ds('scatter', idx, filteredPoints, {
-          label: crime,
-          backgroundColor: color,
-          borderColor: color,
-          pointRadius: 4,
-          showLine: true,
-          borderWidth: 1.5,
-          tension: 0.15,
-          spanGaps: false
-        });
+    });
+    return () => { cancelled = true; };
+  }, [logsUpdated, onMinDate]);
+
+  const chartData = useMemo(() => ({
+    datasets: Object.entries(pointsByCrime).map(([crime, points], index) => {
+      const color = getColor(crime);
+      return ds('scatter', index, points.filter(point => inDateRange(point.x, dateFrom, dateTo)), {
+        label: crime,
+        backgroundColor: color,
+        borderColor: color,
+        pointRadius: 4,
+        showLine: true,
+        borderWidth: 1.5,
+        tension: 0.15,
+        spanGaps: false,
       });
-      setChartData({ datasets });
-    }
-    fetchData();
-  }, [logsUpdated, dateFrom, dateTo, onMinDate]);
+    }),
+  }), [pointsByCrime, dateFrom, dateTo, ds]);
+
+  const visiblePointCount = chartData.datasets.reduce((total, dataset) => total + dataset.data.length, 0);
 
   return (
     <div className="my-4">
       <h5
         style={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setShowChart((prev) => !prev)}
+        onClick={() => setShowChart(prev => !prev)}
         title="Click to show/hide chart"
       >
         Crime Skill Levels
       </h5>
-      {showChart && (
-  <div style={{ height: chartHeight }}>
+      {status === 'loading' ? (
+        <div><img src="/images/loader.gif" alt="Loading crime skills" style={{ maxWidth: '80px' }} /></div>
+      ) : status === 'error' ? (
+        <div role="alert">Crime skills could not be loaded.</div>
+      ) : visiblePointCount === 0 ? (
+        <div role="status">No crime skill data is available for this date range.</div>
+      ) : showChart ? (
+        <div style={{ height: chartHeight }}>
           <Scatter
             data={chartData}
             options={themedOptions({
               responsive: true,
               maintainAspectRatio: false,
-              plugins: {
-                legend: { display: true },
-                title: { display: false },
-                tooltip: { enabled: true },
-              },
+              plugins: { legend: { display: true }, title: { display: false }, tooltip: { enabled: true } },
               scales: {
-                x: {
-                  title: { display: true, text: 'Date' },
-                  type: 'time',
-                  time: { unit: 'day', displayFormats: { day: 'yyyy-MM-dd' }, tooltipFormat: 'yyyy-MM-dd' },
-                  ticks: { source: 'auto', maxRotation: 0, autoSkip: true },
-                },
-                y: {
-                  title: { display: true, text: 'Crime skills' },
-                  beginAtZero: true,
-                },
+                x: { title: { display: true, text: 'Date' }, type: 'time', time: { unit: 'day', displayFormats: { day: 'yyyy-MM-dd' }, tooltipFormat: 'yyyy-MM-dd' }, ticks: { source: 'auto', maxRotation: 0, autoSkip: true } },
+                y: { title: { display: true, text: 'Crime skills' }, beginAtZero: true },
               },
             })}
           />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

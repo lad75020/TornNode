@@ -1,113 +1,88 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useChartTheme from './useChartTheme.js';
-import { openDB } from 'idb';
-
+import { getLogsByLogId } from './dbLayer.js';
 import { Line } from 'react-chartjs-2';
 import InlineStat from './InlineStat.jsx';
+import { toFiniteNumber, toUnixDate } from './financeAnalytics.js';
+
+function inRange(point, dateFrom, dateTo) {
+  const day = new Date(point.x).toISOString().slice(0, 10);
+  return (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo);
+}
 
 export default function FactionBalanceChart({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
-  const [chartData, setChartData] = useState({ datasets: [] });
+  const [points, setPoints] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showChart, setShowChart] = useState(true);
-  const [totalIncreases, setTotalIncreases] = useState(null);
   const { themedOptions, ds } = useChartTheme(darkMode);
 
   useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      const db = await openDB('LogsDB');
-      const storeName = 'logs';
-      if (!db.objectStoreNames.contains(storeName)) {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([getLogsByLogId(6738), getLogsByLogId(6795)])
+      .then(([first, second]) => {
+        if (cancelled) return;
+        const normalized = [...(Array.isArray(first) ? first : []), ...(Array.isArray(second) ? second : [])]
+          .map(row => {
+            const date = toUnixDate(row?.timestamp);
+            const balance = toFiniteNumber(row?.data?.balance_after);
+            return date && balance !== null ? { x: date.getTime(), y: balance } : null;
+          })
+          .filter(Boolean)
+          .sort((left, right) => left.x - right.x || left.y - right.y);
+        setPoints(normalized);
         setLoading(false);
-        return;
-      }
-      const index = db.transaction(storeName).store.index('log');
-      const all = await index.getAll(6738);
-      all.push(... await index.getAll(6795));
-      const points = [];
-      for (const obj of all) {
-        if (obj.data && typeof obj.data.balance_after === 'number' && typeof obj.timestamp === 'number') {
-          // Convert Unix seconds to milliseconds for Chart.js time scale
-          points.push({ x: obj.timestamp * 1000, y: obj.data.balance_after });
+        if (normalized.length && typeof onMinDate === 'function') {
+          try { onMinDate(new Date(normalized[0].x).toISOString().slice(0, 10)); } catch (_) {}
         }
-      }
-      points.sort((a, b) => a.x - b.x);
-      let pts = points;
-      if (dateFrom || dateTo) {
-        pts = points.filter(p => {
-          const day = new Date(p.x).toISOString().slice(0,10);
-          if (dateFrom && day < dateFrom) return false;
-          if (dateTo && day > dateTo) return false;
-          return true;
-        });
-      }
-      if (points.length) {
-        const firstDay = new Date(points[0].x).toISOString().slice(0,10);
-        if (onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(firstDay)) { try { onMinDate(firstDay); } catch {} }
-      }
-      setChartData({
-        datasets: [
-          ds('line', 0, pts, { label: 'Balance', pointRadius: 3, showLine: true, fill: false, tension: 0.2 })
-        ],
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPoints([]);
+        setError('Faction balance data could not be loaded.');
+        setLoading(false);
       });
-      // Calcul du total des augmentations (somme des incréments positifs)
-      let total = 0;
-      for (let i = 1; i < points.length; i++) {
-        const diff = points[i].y - points[i - 1].y;
-        if (diff > 0) total += diff;
-      }
-      setTotalIncreases(total);
-      setLoading(false);
-    }
-    fetchData();
-  }, [logsUpdated]);
+    return () => { cancelled = true; };
+  }, [logsUpdated, onMinDate]);
+
+  const displayedPoints = useMemo(
+    () => points.filter(point => inRange(point, dateFrom, dateTo)),
+    [points, dateFrom, dateTo],
+  );
+  const totalIncreases = useMemo(() => points.reduce((total, point, index) => {
+    if (index === 0) return total;
+    const increase = point.y - points[index - 1].y;
+    return increase > 0 ? total + increase : total;
+  }, 0), [points]);
+  const chartData = useMemo(() => ({
+    datasets: [ds('line', 0, displayedPoints, { label: 'Balance', pointRadius: 3, showLine: true, fill: false, tension: 0.2 })],
+  }), [displayedPoints, ds]);
 
   return (
     <div className="my-4">
-      <h5
-        style={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setShowChart((prev) => !prev)}
-        title="Click to show/hide chart"
-      >
-        Faction balance
-      </h5>
+      <h5 style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setShowChart(previous => !previous)} title="Click to show/hide chart">Faction balance</h5>
       {loading ? (
-        <div>
-          <img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: "80px" }} />
-        </div>
-      ) : (
-        showChart && (
-          <>
-            <div style={{ height: chartHeight }}>
-              <Line
-                data={chartData}
-                options={themedOptions({
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: { display: true },
-                    title: { display: false },
-                    tooltip: { enabled: true },
-                  },
-                  scales: {
-                    x: {
-                      title: { display: true, text: 'Date' },
-                      type: 'time',
-                      time: { unit: 'day', displayFormats: { day: 'yyyy-MM-dd' }, tooltipFormat: 'yyyy-MM-dd' },
-                      ticks: { source: 'auto', maxRotation: 0, autoSkip: true },
-                    },
-                    y: {
-                      title: { display: true, text: 'Balance' },
-                      beginAtZero: true,
-                    },
-                  },
-                })}
-              />
-            </div>
-            <InlineStat id="factionEarnedTotal" label="Earned Total:" value={totalIncreases} />
-          </>
-        )
-      )}
+        <div><img src="/images/loader.gif" alt="Loading..." style={{ maxWidth: '80px' }} /></div>
+      ) : error || displayedPoints.length === 0 ? (
+        <div role="status">{error || 'No faction balance data available for this range.'}</div>
+      ) : showChart ? (
+        <>
+          <div style={{ height: chartHeight }}>
+            <Line data={chartData} options={themedOptions({
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: true }, title: { display: false }, tooltip: { enabled: true } },
+              scales: {
+                x: { title: { display: true, text: 'Date' }, type: 'time', time: { unit: 'day', displayFormats: { day: 'yyyy-MM-dd' }, tooltipFormat: 'yyyy-MM-dd' } },
+                y: { title: { display: true, text: 'Balance' }, beginAtZero: true },
+              },
+            })} />
+          </div>
+          <InlineStat id="factionEarnedTotal" label="Earned Total:" value={totalIncreases} />
+        </>
+      ) : null}
     </div>
   );
 }

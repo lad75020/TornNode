@@ -1,135 +1,142 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import useChartTheme from './useChartTheme.js';
 import { Pie } from 'react-chartjs-2';
+import { toFiniteNumber } from './financeAnalytics.js';
 
-/**
- * NetworthPieChart
- * Récupère via WebSocket (message 'lastNetworth') la dernière répartition networth
- * et l'affiche en camembert.
- */
-export default function NetworthPieChart({ wsRef, wsMessages, sendWs, darkMode, chartHeight = 420 }) {
+const NETWORTH_PARTS = [
+  ['Wallet', 'networthwallet'],
+  ['Vault', 'networthvault'],
+  ['Bank', 'networthbank'],
+  ['Cayman', 'networthcayman'],
+  ['Points', 'networthpoints'],
+  ['Items', 'networthitems'],
+  ['DisplayCase', 'networthdisplaycase'],
+  ['Bazaar', 'networthbazaar'],
+  ['ItemMarket', 'networthitemmarket'],
+  ['Properties', 'networthproperties'],
+  ['StockMarket', 'networthstockmarket'],
+  ['Auction', 'networthauctionhouse'],
+  ['Bookie', 'networthbookie'],
+  ['Company', 'networthcompany'],
+  ['EnlistedCars', 'networthenlistedcars'],
+  ['PiggyBank', 'networthpiggybank'],
+  ['Pending', 'networthpending'],
+];
+
+function parseMessage(message) {
+  if (typeof message === 'string') {
+    try { return JSON.parse(message); } catch (_) { return null; }
+  }
+  return message && typeof message === 'object' ? message : null;
+}
+
+function normalizeNetworth(value) {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(NETWORTH_PARTS
+    .map(([, key]) => [key, toFiniteNumber(value[key])])
+    .filter(([, number]) => number !== null && number !== 0));
+}
+
+export default function NetworthPieChart({ wsRef, wsMessages = [], sendWs, darkMode, chartHeight = 420 }) {
   const { themedOptions, theme } = useChartTheme(darkMode);
   const [networth, setNetworth] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const requestedRef = useRef(false);
+  const processedMessageRef = useRef(null);
 
-  // Envoi initial + rafraîchissement périodique toutes les 12h
   useEffect(() => {
-    function request() {
-      if (wsRef && wsRef.current && wsRef.current.readyState === 1) {
-        try { sendWs && sendWs('lastNetworth'); } catch(_) {}
+    const request = () => {
+      if (typeof sendWs !== 'function') return;
+      if (wsRef && wsRef.current && wsRef.current.readyState !== 1) return;
+      try { sendWs('lastNetworth'); } catch (_) {
+        setError('Latest networth could not be loaded. Please retry.');
+        setLoading(false);
       }
-    }
+    };
     if (!requestedRef.current) {
-      request();
       requestedRef.current = true;
+      request();
     }
-    const interval = setInterval(request, 12 * 60 * 60 * 1000); // 12h
+    const interval = setInterval(request, 12 * 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, [wsRef, sendWs]);
 
-  // Écoute des nouveaux messages pour capter lastNetworth
   useEffect(() => {
-
-    if (!wsMessages || wsMessages.length === 0) return;
-    const last = wsMessages[wsMessages.length - 1];
-
-    if (!last || !last.startsWith('{')) return;
-    try {
-      const parsed = JSON.parse(last);
-
-      if (parsed && parsed.type === 'lastNetworth' && parsed.networth && !parsed.error) {
-        setNetworth(parsed.networth);
+    for (let index = wsMessages.length - 1; index >= 0; index -= 1) {
+      const parsed = parseMessage(wsMessages[index]);
+      if (!parsed || parsed.type !== 'lastNetworth') continue;
+      const signature = JSON.stringify(parsed);
+      if (processedMessageRef.current === signature) return;
+      processedMessageRef.current = signature;
+      if (parsed.error) {
+        setNetworth(null);
+        setError(String(parsed.error));
+        setLoading(false);
+        return;
       }
-    } catch(_) {}
+      const normalized = normalizeNetworth(parsed.networth);
+      setNetworth(Object.keys(normalized).length ? normalized : null);
+      setError(Object.keys(normalized).length ? null : 'Latest networth could not be loaded. Please retry.');
+      setLoading(false);
+      return;
+    }
   }, [wsMessages]);
 
   const { data, total, sortedParts } = useMemo(() => {
     if (!networth) return { data: null, total: 0, sortedParts: [] };
-    // Mapping label lisible -> clé objet
-    const mapping = [
-      ['Wallet', 'networthwallet'],
-      ['Vault', 'networthvault'],
-      ['Bank', 'networthbank'],
-      ['Cayman', 'networthcayman'],
-      ['Points', 'networthpoints'],
-      ['Items', 'networthitems'],
-      ['DisplayCase', 'networthdisplaycase'],
-      ['Bazaar', 'networthbazaar'],
-      ['ItemMarket', 'networthitemmarket'],
-      ['Properties', 'networthproperties'],
-      ['StockMarket', 'networthstockmarket'],
-      ['Auction', 'networthauctionhouse'],
-      ['Bookie', 'networthbookie'],
-      ['Company', 'networthcompany'],
-      ['EnlistedCars', 'networthenlistedcars'],
-      ['PiggyBank', 'networthpiggybank'],
-      ['Pending', 'networthpending']
-    ];
-    const parts = [];
-    for (const [lbl, key] of mapping) {
-      const v = Number(networth[key]);
-      if (Number.isFinite(v) && v !== 0) parts.push({ label: lbl, value: v, key });
+    const parts = NETWORTH_PARTS
+      .map(([label, key]) => ({ label, key, value: networth[key] }))
+      .filter(part => Number.isFinite(part.value) && part.value > 0);
+    const totalValue = parts.reduce((sum, part) => sum + part.value, 0);
+    if (!parts.length || !Number.isFinite(totalValue) || totalValue <= 0) {
+      return { data: null, total: 0, sortedParts: [] };
     }
-    // Total brut avant fusion
-    const totalVal = parts.reduce((a,b)=> a + b.value, 0);
-    const threshold = totalVal * 0.01; // 1%
+    const threshold = totalValue * 0.01;
     const mainParts = [];
     let otherSum = 0;
-    for (const p of parts) {
-      if (p.value < threshold) otherSum += p.value; else mainParts.push(p);
+    for (const part of parts) {
+      if (part.value < threshold) otherSum += part.value;
+      else mainParts.push(part);
     }
-    if (otherSum > 0) mainParts.push({ label: 'Other', value: otherSum, key: 'other' });
-    // Tri décroissant après fusion
-    mainParts.sort((a,b)=> b.value - a.value);
-    const labels = mainParts.map(p=> p.label);
-    const values = mainParts.map(p=> p.value);
-    // Couleurs: réutiliser palette lignes, la répéter si nécessaire
+    if (otherSum > 0) mainParts.push({ label: 'Other', key: 'other', value: otherSum });
+    mainParts.sort((left, right) => right.value - left.value);
+    const labels = mainParts.map(part => part.label);
     const palette = theme.linePalette || [];
-    const bg = labels.map((_,i)=>{
-      const c = palette[i % palette.length] || '#8884d8';
-      // s'assurer d'une opacité ~0.7 si pas déjà
-      if (/rgba\(/.test(c) && !/0\.7\)/.test(c)) return c.replace(/\d?\.\d+\)$/,'0.7)');
-      return c;
-    });
-    const border = bg.map(c => {
-      let out = c;
-      out = out.replace(/0\.7\)/, '1)').replace(/0\.6\)/, '1)').replace(/0\.5\)/, '1)');
-      return out;
-    });
+    const backgroundColor = labels.map((_, index) => palette[index % Math.max(palette.length, 1)] || '#8884d8');
+    const borderColor = backgroundColor.map(color => color.replace(/0\.[0-9]+\)/, '1)'));
     return {
-      total: totalVal,
-      sortedParts: parts,
+      total: totalValue,
+      sortedParts: mainParts,
       data: {
         labels,
-        datasets: [
-          {
-            label: 'Networth distribution',
-            data: values,
-            backgroundColor: bg,
-            borderColor: border,
-            borderWidth: 1,
-          }
-        ]
-      }
+        datasets: [{ label: 'Networth distribution', data: mainParts.map(part => part.value), backgroundColor, borderColor, borderWidth: 1 }],
+      },
     };
   }, [networth, theme]);
 
+  const refresh = () => {
+    try { sendWs?.('lastNetworth'); } catch (_) {
+      setError('Latest networth could not be loaded. Please retry.');
+    }
+  };
+
   return (
-    <div style={{ height: chartHeight, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <div style={{ flex:'0 0 auto' }} className="d-flex align-items-center justify-content-between mb-1">
-        <h5 className="m-0" style={{ cursor:'pointer', userSelect:'none', fontSize: '1rem' }} title="Dernière répartition networth">Networth Breakdown</h5>
-        <div className="btn-group btn-group-sm">
-          <button className="btn btn-outline-secondary" onClick={()=>{ try { sendWs('lastNetworth'); } catch(_) {} }} title="Rafraîchir">↻</button>
-        </div>
+    <div style={{ height: chartHeight, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="d-flex align-items-center justify-content-between mb-1">
+        <h5 className="m-0" style={{ cursor: 'pointer', userSelect: 'none', fontSize: '1rem' }}>Networth Breakdown</h5>
+        <button className="btn btn-outline-secondary btn-sm" onClick={refresh} title="Refresh">↻</button>
       </div>
-      {!data ? (
-        <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', padding:8 }}>
-          <div>Aucune donnée</div>
-          <button className="btn btn-sm btn-outline-primary mt-2" onClick={()=>{ try { sendWs('lastNetworth'); requestedRef.current = true; } catch(_) {} }}>Refresh</button>
+      {loading ? (
+        <div role="status">Loading...</div>
+      ) : error || !data ? (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 8 }}>
+          <div role="status">{error || 'No networth breakdown available.'}</div>
+          <button className="btn btn-sm btn-outline-primary mt-2" onClick={refresh}>Refresh</button>
         </div>
       ) : (
         <>
-          <div style={{ flex:1, minHeight:0, position:'relative' }}>
+          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <Pie
               data={data}
               options={themedOptions({
@@ -138,37 +145,18 @@ export default function NetworthPieChart({ wsRef, wsMessages, sendWs, darkMode, 
                 cutout: '55%',
                 plugins: {
                   legend: { position: 'right', labels: { boxWidth: 14 } },
-                  tooltip: { callbacks: { label: (ctx) => {
-                    const val = ctx.parsed || 0;
-                    const pct = total ? ((val/total)*100).toFixed(1) : '0.0';
-                    return `${ctx.label}: ${val.toLocaleString()} (${pct}%)`;
-                  } } },
-                  title: { display: true, text: `Total: ${total.toLocaleString()}` }
-                }
+                  tooltip: { callbacks: { label: context => `${context.label}: ${context.parsed.toLocaleString()} (${((context.parsed / total) * 100).toFixed(1)}%)` } },
+                  title: { display: true, text: `Total: ${total.toLocaleString()}` },
+                },
               })}
             />
           </div>
-          <div style={{ flex:'0 0 160px', overflowY:'auto', fontSize:12, marginTop:4, borderTop:'1px solid rgba(128,128,128,0.25)' }}>
-            <table className="table table-sm table-striped mb-0" style={{ position:'relative' }}>
-              <thead className="sticky-top" style={{ background: darkMode ? '#222' : '#f8f9fa' }}>
-                <tr>
-                  <th>Part</th>
-                  <th>Valeur</th>
-                  <th>%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedParts.map(p => {
-                  const pct = total ? ((p.value/total)*100).toFixed(2) : '0.00';
-                  return (
-                    <tr key={p.key}>
-                      <td>{p.label}</td>
-                      <td>{p.value.toLocaleString()}</td>
-                      <td>{pct}%</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+          <div style={{ flex: '0 0 160px', overflowY: 'auto', fontSize: 12, marginTop: 4, borderTop: '1px solid rgba(128,128,128,0.25)' }}>
+            <table className="table table-sm table-striped mb-0">
+              <thead><tr><th>Part</th><th>Value</th><th>%</th></tr></thead>
+              <tbody>{sortedParts.map(part => (
+                <tr key={part.key}><td>{part.label}</td><td>{part.value.toLocaleString()}</td><td>{((part.value / total) * 100).toFixed(2)}%</td></tr>
+              ))}</tbody>
             </table>
           </div>
         </>

@@ -1,120 +1,99 @@
-import { openDB } from 'idb';
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
-import { filterDatasetsByDate } from './dateFilterUtil';
-import useChartTheme from './useChartTheme';
-
+import useChartTheme from './useChartTheme.js';
+import { getLogsByLogId } from './dbLayer.js';
+import { filterBuckets, toFiniteNumber, toUnixDate } from './financeAnalytics.js';
 
 export default function BetResultsGraph({ logsUpdated, darkMode, chartHeight = 400, dateFrom, dateTo, onMinDate }) {
-  const [chartData, setChartData] = useState({ datasets: [] });
+  const [source, setSource] = useState({ labels: [], gain: [], bets: [] });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showChart, setShowChart] = useState(true);
-  // Appel du hook une seule fois au niveau racine
   const { ds, themedOptions } = useChartTheme(darkMode);
 
   useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      const db = await openDB('LogsDB');
-      const storeName = 'logs';
-      if (!db.objectStoreNames.contains(storeName)) {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([getLogsByLogId(8300), getLogsByLogId(8301)])
+      .then(([wins, bets]) => {
+        if (cancelled) return;
+        const days = new Map();
+        const add = (row, gain, bet) => {
+          const date = toUnixDate(row?.timestamp);
+          if (!date) return;
+          const label = date.toISOString().slice(0, 10);
+          const current = days.get(label) || { gain: 0, bets: 0 };
+          current.gain += gain;
+          current.bets += bet;
+          days.set(label, current);
+        };
+        for (const row of Array.isArray(wins) ? wins : []) {
+          const won = toFiniteNumber(row?.data?.won_amount);
+          const wager = toFiniteNumber(row?.data?.bet_amount);
+          if (won !== null && wager !== null) add(row, won - wager, 0);
+        }
+        for (const row of Array.isArray(bets) ? bets : []) {
+          const wager = toFiniteNumber(row?.data?.bet_amount);
+          if (wager !== null) add(row, 0, -wager);
+        }
+        const labels = [...days.keys()].sort();
+        const gain = labels.map(label => days.get(label).gain);
+        const betValues = labels.map(label => days.get(label).bets);
+        for (let index = 0; index < labels.length; index += 1) {
+          if (gain[index] > -betValues[index]) betValues[index] = 0;
+        }
+        setSource({ labels, gain, bets: betValues });
         setLoading(false);
-        return;
-      }
-      const logsToFetch = [8300, 8301];
-      const daySums = { 8300: {}, 8301: {} };
-      // 1. Récupérer tous les logs pour chaque type
-      for (const logVal of logsToFetch) {
-        const index = db.transaction(storeName).store.index('log');
-        const all = await index.getAll(logVal);
-        for (const obj of all) {
-          if (typeof obj.timestamp === 'number' && obj.data) {
-            const day = new Date(obj.timestamp * 1000).toLocaleDateString();
-            if (!daySums[logVal][day]) daySums[logVal][day] = 0;
-            if (logVal === 8300) {
-              daySums[logVal][day] += (Number(obj.data.won_amount) || 0) - (Number(obj.data.bet_amount) || 0);
-            } else if (logVal === 8301) {
-              daySums[logVal][day] += -1 * (Number(obj.data.bet_amount) || 0);
-            }
-          }
+        if (labels.length && typeof onMinDate === 'function') {
+          try { onMinDate(labels[0]); } catch (_) {}
         }
-      }
-      // 2. Trouver le timestamp le plus bas pour chaque jour
-      const dayTsMap = {};
-      for (const logVal of logsToFetch) {
-        const index = db.transaction(storeName).store.index('log');
-        const all = await index.getAll(logVal);
-        for (const obj of all) {
-          if (typeof obj.timestamp === 'number') {
-            const day = new Date(obj.timestamp * 1000).toLocaleDateString();
-            if (dayTsMap[day] === undefined || obj.timestamp < dayTsMap[day]) {
-              dayTsMap[day] = obj.timestamp;
-            }
-          }
-        }
-      }
-      const sortedDays = Object.keys(dayTsMap)
-        .map(day => ({ day, ts: dayTsMap[day] }))
-        .sort((a, b) => a.ts - b.ts)
-        .map(obj => obj.day);
-      // 3. Appliquer la condition sur les jours
-      sortedDays.forEach(day => {
-        if ((daySums[8300][day]) > -1 * daySums[8301][day]) {
-          daySums[8301][day] = 0;
-        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSource({ labels: [], gain: [], bets: [] });
+        setError('Slot results could not be loaded.');
+        setLoading(false);
       });
-      const data8300 = sortedDays.map(day => daySums[8300][day] || 0);
-      const data8301 = sortedDays.map(day => daySums[8301][day] || 0);
-      if (sortedDays.length && onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(sortedDays[0])) {
-        try { onMinDate(sortedDays[0]); } catch { }
-      }
-      const base = {
-        labels: sortedDays, datasets: [
-          ds('bar', 0, data8300, { label: 'Gain', borderWidth: 1 }),
-          ds('bar', 1, data8301, { label: 'Bets', borderWidth: 1 }),
-        ]
-      };
-      const filtered = filterDatasetsByDate(base.labels, base.datasets, dateFrom, dateTo);
-      setChartData(filtered);
-      setLoading(false);
-    }
-    fetchData();
-  }, [logsUpdated, darkMode, dateFrom, dateTo, onMinDate]);
+    return () => { cancelled = true; };
+  }, [logsUpdated, onMinDate]);
+
+  const filtered = useMemo(() => filterBuckets(
+    source.labels,
+    [{ label: 'Gain', data: source.gain }, { label: 'Bets', data: source.bets }],
+    dateFrom,
+    dateTo,
+    'day',
+  ), [source, dateFrom, dateTo]);
+
+  const chartData = useMemo(() => ({
+    labels: filtered.labels,
+    datasets: [
+      ds('bar', 0, filtered.datasets[0]?.data || [], { label: 'Gain', borderWidth: 1 }),
+      ds('bar', 1, filtered.datasets[1]?.data || [], { label: 'Bets', borderWidth: 1 }),
+    ],
+  }), [ds, filtered]);
 
   return (
     <div className="my-4">
-      <h5
-        style={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setShowChart((prev) => !prev)}
-        title="Click to show/hide chart"
-      >
-        Slots Results
-      </h5>
+      <h5 style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setShowChart(previous => !previous)} title="Click to show/hide chart">Slots Results</h5>
       {loading ? (
-        <div>
-          <img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: "80px" }} />
+        <div><img src="/images/loader.gif" alt="Loading..." style={{ maxWidth: '80px' }} /></div>
+      ) : error || filtered.labels.length === 0 ? (
+        <div role="status">{error || 'No slot results available for this range.'}</div>
+      ) : showChart ? (
+        <div style={{ height: chartHeight }}>
+          <Bar data={chartData} options={themedOptions({
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true }, title: { display: false }, tooltip: { enabled: true } },
+            scales: {
+              x: { title: { display: true, text: 'Day' }, type: 'category' },
+              y: { title: { display: true, text: 'Amount' }, beginAtZero: true, type: 'linear' },
+            },
+          })} />
         </div>
-      ) : (
-        showChart && (
-          <div style={{ height: chartHeight }}>
-            <Bar
-              data={chartData}
-              options={themedOptions({
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                  legend: { display: true },
-                  title: { display: false },
-                  tooltip: { enabled: true },
-                },
-                scales: {
-                  x: { title: { display: true, text: 'Day' }, type: 'category' },
-                  y: { title: { display: true, text: 'Amount' }, beginAtZero: true, type: 'linear' },
-                },
-              })} />
-          </div>
-        )
-      )}
+      ) : null}
     </div>
   );
 }

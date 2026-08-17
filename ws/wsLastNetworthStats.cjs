@@ -1,63 +1,82 @@
-// wsLastNetworthStats.js
-// Envoie via websocket le dernier document (par date) de la collection Stats
-// avec uniquement certains champs personalstats.* networth.
+'use strict';
 
-module.exports = async function (socket, req, fastify) {
+const getUserDb = require('../utils/getUserDb.cjs');
+const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
+const {
+  SAFE_ERRORS,
+  getAuthenticatedSession,
+  sendJson,
+  logMessage,
+} = require('../utils/tornSyncHelpers.cjs');
+
+const NETWORTH_PARTS = Object.freeze([
+  ['networthwallet', 'wallet'],
+  ['networthvault', 'vaults'],
+  ['networthbank', 'bank'],
+  ['networthcayman', 'overseas_bank'],
+  ['networthpoints', 'points'],
+  ['networthitems', 'inventory'],
+  ['networthdisplaycase', 'displaycase'],
+  ['networthbazaar', 'bazaar'],
+  ['networthitemmarket', 'item_market'],
+  ['networthproperties', 'property'],
+  ['networthstockmarket', 'stock_market'],
+  ['networthauctionhouse', 'auction_house'],
+  ['networthbookie', 'bookie'],
+  ['networthcompany', 'company'],
+  ['networthenlistedcars', 'enlisted_cars'],
+  ['networthpiggybank', 'piggy_bank'],
+  ['networthpending', 'pending'],
+]);
+
+function finiteNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value.replace(/,/g, '').trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toIsoDate(value) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+module.exports = async function wsLastNetworthStats(socket, req, fastify) {
+  const authenticated = getAuthenticatedSession(req, { requireApiKey: true });
+  if (!authenticated.ok) {
+    sendJson(socket, { type: 'lastNetworth', error: authenticated.reason });
+    return;
+  }
+
   try {
-    const getUserDb = require('../utils/getUserDb.cjs');
-    let coll;
-    try {
-  const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-  await ensureUserDbStructure(fastify, req.session.userId, null);
-  const db = getUserDb(fastify, req);
-      coll = db.collection('Stats');
-    } catch(e){
-      try { socket.send(JSON.stringify({ type:'lastNetworth', error: e.message })); } catch(_){ }
-      return;
-    }
-
-    // Trouver le dernier document par date (assumant champ date stocké en Date)
-  const doc = await coll.findOne({}, {
-      projection: {
-        date: 1,
-        'personalstats.networth': 1
-      },
+    await ensureUserDbStructure(fastify, authenticated.userId, fastify && fastify.log);
+    const collection = getUserDb(fastify, req).collection('Stats');
+    const document = await collection.findOne({}, {
+      projection: { _id: 0, date: 1, 'personalstats.networth': 1 },
       sort: { date: -1 },
-      limit: 1
     });
-
-  if (!doc || !doc.personalstats || !doc.personalstats.networth) {
-      try { socket.send(JSON.stringify({ type: 'lastNetworth', error: 'No Stats document found' })); } catch(_) {}
+    const date = toIsoDate(document && document.date);
+    const source = document && document.personalstats && document.personalstats.networth;
+    if (!date || !source || typeof source !== 'object') {
+      sendJson(socket, { type: 'lastNetworth', error: SAFE_ERRORS.LATEST_NETWORTH_FAILED });
       return;
     }
 
-      const payload = {
-        type: 'lastNetworth',
-        date: doc.date,
-        networth :{
-      networthwallet: doc.personalstats.networth.wallet ?? 0,
-      networthvault:  doc.personalstats.networth.vaults ?? 0,
-      networthbank: doc.personalstats.networth.bank ?? 0,
-      networthcayman: doc.personalstats.networth.overseas_bank ?? 0,
-      networthpoints: doc.personalstats.networth.points ?? 0,
-      networthitems: doc.personalstats.networth.inventory ?? 0,
-      networthdisplaycase: doc.personalstats.networth.displaycase ?? 0,
-      networthbazaar: doc.personalstats.networth.bazaar ?? 0,
-      networthitemmarket: doc.personalstats.networth.item_market ?? 0,
-      networthproperties: doc.personalstats.networth.property ?? 0,
-      networthstockmarket: doc.personalstats.networth.stock_market ?? 0,
-      networthauctionhouse: doc.personalstats.networth.auction_house ?? 0,
-      networthbookie: doc.personalstats.networth.bookie ?? 0,
-      networthcompany: doc.personalstats.networth.company ?? 0,
-      networthenlistedcars: doc.personalstats.networth.enlisted_cars ?? 0,
-      networthpiggybank: doc.personalstats.networth.piggy_bank ?? 0,
-      networthpending: doc.personalstats.networth.pending ?? 0
-        }
-      };
-
-
-    try { socket.send(JSON.stringify(payload)); } catch(_) {}
-  } catch (e) {
-    try { socket.send(JSON.stringify({ type: 'lastNetworth', error: e.message })); } catch(_) {}
+    const networth = {};
+    for (const [responseKey, sourceKey] of NETWORTH_PARTS) {
+      const value = finiteNumber(source[sourceKey]);
+      if (value !== null) networth[responseKey] = value;
+    }
+    if (Object.keys(networth).length === 0) {
+      sendJson(socket, { type: 'lastNetworth', error: SAFE_ERRORS.LATEST_NETWORTH_FAILED });
+      return;
+    }
+    sendJson(socket, { type: 'lastNetworth', date, networth });
+  } catch (error) {
+    logMessage(fastify, 'error', 'latest networth retrieval failed', {
+      userId: authenticated.userId,
+      error: error && error.message,
+    });
+    sendJson(socket, { type: 'lastNetworth', error: SAFE_ERRORS.LATEST_NETWORTH_FAILED });
   }
 };

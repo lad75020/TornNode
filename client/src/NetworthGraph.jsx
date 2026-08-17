@@ -1,110 +1,121 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import useChartTheme from './useChartTheme.js';
-
 import { Line } from 'react-chartjs-2';
+import { filterBuckets, toFiniteNumber } from './financeAnalytics.js';
 
-import { filterDatasetsByDate } from './dateFilterUtil.js';
+function parseMessage(message) {
+  if (typeof message === 'string') {
+    try { return JSON.parse(message); } catch (_) { return null; }
+  }
+  return message && typeof message === 'object' ? message : null;
+}
+
+function normalizeSnapshots(value) {
+  if (!Array.isArray(value)) return [];
+  const snapshots = value
+    .map(item => {
+      const date = new Date(item?.date);
+      const numericValue = toFiniteNumber(item?.value);
+      return Number.isNaN(date.getTime()) || numericValue === null
+        ? null
+        : { date: date.toISOString(), value: numericValue };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.date.localeCompare(right.date) || left.value - right.value);
+  const unique = [];
+  for (const snapshot of snapshots) {
+    if (unique.length === 0 || unique[unique.length - 1].date !== snapshot.date) unique.push(snapshot);
+  }
+  return unique;
+}
 
 export default function NetworthGraph({ darkMode, wsMessages = [], sendWs, dateFrom, dateTo, onMinDate }) {
-  const [chartData, setChartData] = useState({ datasets: [] });
+  const [snapshots, setSnapshots] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showChart, setShowChart] = useState(true);
-  const { themedOptions, ds } = useChartTheme(darkMode);
   const requestedRef = useRef(false);
+  const processedMessageRef = useRef(null);
+  const { themedOptions, ds } = useChartTheme(darkMode);
 
-  // Envoi de la requête WebSocket une seule fois
   useEffect(() => {
-    if (!requestedRef.current && sendWs) {
-      try { sendWs('getNetworth'); requestedRef.current = true; setLoading(true); } catch(_) {}
+    if (requestedRef.current || typeof sendWs !== 'function') return;
+    requestedRef.current = true;
+    setLoading(true);
+    try { sendWs('getNetworth'); } catch (_) {
+      setError('Networth could not be loaded. Please retry.');
+      setLoading(false);
     }
   }, [sendWs]);
 
-  // Écoute des messages WebSocket
   useEffect(() => {
-    if (!wsMessages || wsMessages.length === 0) return;
-    // Chercher le dernier message getNetworth
-    for (let i = wsMessages.length - 1; i >= 0; i--) {
-      const msg = wsMessages[i];
-      if (typeof msg === 'string' && msg.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(msg);
-          if (parsed && parsed.type === 'getNetworth') {
-            if (parsed.error) {
-              setChartData({ datasets: [] });
-              setLoading(false);
-              return;
-            }
-            const data = Array.isArray(parsed.data) ? parsed.data : [];
-            const labels = data.map(item => {
-              try {
-                if (!item?.date) return '';
-                if (/^\d{4}-\d{2}-\d{2}$/.test(item.date.slice(0,10))) return item.date.slice(0,10);
-                const d = new Date(item.date);
-                if (isNaN(d.getTime())) return String(item.date);
-                const y = d.getFullYear();
-                const m = String(d.getMonth()+1).padStart(2,'0');
-                const day = String(d.getDate()).padStart(2,'0');
-                return `${y}-${m}-${day}`;
-              } catch(_) { return String(item?.date || ''); }
-            });
-            const values = data.map(item => item.value);
-            if (labels.length && onMinDate && /^\d{4}-\d{2}-\d{2}$/.test(labels[0])) {
-              try { onMinDate(labels[0]); } catch {}
-            }
-            let datasets = [
-              ds('line', 0, values, { label: 'Networth', pointRadius: 3, showLine: true, fill: false, tension: 0.2 })
-            ];
-            const filtered = filterDatasetsByDate(labels, datasets, dateFrom, dateTo);
-            setChartData(filtered);
-            setLoading(false);
-            return; // stop après le plus récent
-          }
-        } catch(_) { /* ignore */ }
+    for (let index = wsMessages.length - 1; index >= 0; index -= 1) {
+      const parsed = parseMessage(wsMessages[index]);
+      if (!parsed || parsed.type !== 'getNetworth') continue;
+      const signature = JSON.stringify(parsed);
+      if (processedMessageRef.current === signature) return;
+      processedMessageRef.current = signature;
+      if (parsed.error) {
+        setSnapshots([]);
+        setError(String(parsed.error));
+        setLoading(false);
+        return;
       }
+      const normalized = normalizeSnapshots(parsed.data);
+      setSnapshots(normalized);
+      setError(null);
+      setLoading(false);
+      if (normalized.length && typeof onMinDate === 'function') {
+        try { onMinDate(normalized[0].date.slice(0, 10)); } catch (_) {}
+      }
+      return;
     }
-  }, [wsMessages]);
+  }, [wsMessages, onMinDate]);
+
+  const filtered = useMemo(() => filterBuckets(
+    snapshots.map(snapshot => snapshot.date.slice(0, 10)),
+    [{ label: 'Networth', data: snapshots.map(snapshot => snapshot.value) }],
+    dateFrom,
+    dateTo,
+    'day',
+  ), [snapshots, dateFrom, dateTo]);
+
+  const chartData = useMemo(() => ({
+    labels: filtered.labels,
+    datasets: [ds('line', 0, filtered.datasets[0]?.data || [], {
+      label: 'Networth', pointRadius: 3, showLine: true, fill: false, tension: 0.2,
+    })],
+  }), [ds, filtered]);
 
   return (
     <div className="my-4">
       <h5
         style={{ cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setShowChart((prev) => !prev)}
+        onClick={() => setShowChart(previous => !previous)}
         title="Click to show/hide chart"
       >
         Networth by Date
       </h5>
       {loading ? (
-        <div>
-          <img src="/images/loader.gif" alt="Chargement..." style={{ maxWidth: "80px" }} />
+        <div><img src="/images/loader.gif" alt="Loading..." style={{ maxWidth: '80px' }} /></div>
+      ) : error || filtered.labels.length === 0 ? (
+        <div role="status">{error || 'No networth data available for this range.'}</div>
+      ) : showChart ? (
+        <div style={{ height: 400 }}>
+          <Line
+            data={chartData}
+            options={themedOptions({
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: true }, title: { display: false }, tooltip: { enabled: true } },
+              scales: {
+                x: { title: { display: true, text: 'Date' }, type: 'category' },
+                y: { title: { display: true, text: 'Networth' }, beginAtZero: true },
+              },
+            })}
+          />
         </div>
-      ) : (
-        showChart && (
-          <div style={{ height: 400 }}>
-            <Line
-              data={chartData}
-              options={themedOptions({
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                  legend: { display: true },
-                  title: { display: false },
-                  tooltip: { enabled: true },
-                },
-                scales: {
-                  x: {
-                    title: { display: true, text: 'Date' },
-                    type: 'category',
-                  },
-                  y: {
-                    title: { display: true, text: 'Networth' },
-                    beginAtZero: true,
-                  },
-                },
-              })}
-            />
-          </div>
-        )
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1,61 +1,69 @@
-// Agrège l'historique des snapshots CompanyProfile
-// Sortie: { type:'getCompanyProfileHistory', ok:true, series:{ metricKey: [{t,v}] }, lastTimestamp, metricsRank }
-// metricsRank: classement simple des métriques selon la dernière valeur (utile pour UI future)
-module.exports = async function wsGetCompanyProfileHistory(socket, req, fastify, parsed) {
-  const respBase = { type: 'getCompanyProfileHistory' };
-  if (!req.session || !req.session.TornAPIKey) {
-    try { socket.send(JSON.stringify({ ...respBase, ok:false, error:'unauthorized' })); } catch {}
+'use strict';
+
+const {
+  MAX_HISTORY_POINTS,
+  canonicalSeries,
+  hasAuthenticatedCompanySession,
+  normalizeEpochMs,
+  normalizePoint,
+  normalizeRange,
+  sendJson,
+  userDatabase,
+  withRequestId,
+} = require('../utils/companyAnalytics.cjs');
+
+const METRICS = ['daily_income', 'weekly_income', 'employees_hired', 'employees_capacity', 'daily_customers', 'weekly_customers'];
+
+module.exports = async function wsGetCompanyProfileHistory(socket, req, fastify, parsed = {}) {
+  const base = { type: 'getCompanyProfileHistory' };
+  if (!hasAuthenticatedCompanySession(req)) {
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'unauthorized' }, parsed));
     return;
   }
+  const now = Date.now();
+  const range = normalizeRange(parsed, { defaultFrom: now - 7 * 24 * 60 * 60 * 1000, defaultTo: now });
+  if (!range) {
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'invalid_range' }, parsed));
+    return;
+  }
+
   try {
-    const database = fastify.mongo.client.db(req.session.userId.toString());
-    const col = database.collection('CompanyProfile');
-    // Filtrage optionnel par plage de dates
-    const from = parsed && Number(parsed.from);
-    const to = parsed && Number(parsed.to);
-    const filter = {};
-    if (Number.isFinite(from) || Number.isFinite(to)) {
-      filter.timestamp = {};
-      if (Number.isFinite(from)) filter.timestamp.$gte = from;
-      if (Number.isFinite(to)) filter.timestamp.$lte = to;
+    const database = userDatabase(fastify, req);
+    if (!database) throw new Error('database_unavailable');
+    const query = { timestamp: { $gte: Math.floor(range.from / 1000), $lte: range.to } };
+    const documents = await database.collection('CompanyProfile')
+      .find(query, { projection: { _id: 0, timestamp: 1, company: 1 }, sort: { timestamp: 1 } })
+      .toArray();
+    const docs = documents
+      .map(document => ({ document, timestamp: normalizeEpochMs(document?.timestamp) }))
+      .filter(({ document, timestamp }) => document?.company && timestamp !== null && timestamp >= range.from && timestamp <= range.to)
+      .sort((left, right) => left.timestamp - right.timestamp)
+      .slice(0, MAX_HISTORY_POINTS);
+    const rawSeries = Object.fromEntries(METRICS.map(metric => [metric, []]));
+    for (const { document, timestamp } of docs) {
+      for (const metric of METRICS) {
+        const point = normalizePoint(timestamp, document.company[metric]);
+        if (point) rawSeries[metric].push(point);
+      }
     }
-    // On récupère les snapshots (projection réduite)
-    const cursor = col.find(filter, { projection: { _id:0, timestamp:1, company:1 } }).sort({ timestamp:1 });
-    const series = {
-      daily_income: [],
-      weekly_income: [],
-      employees_hired: [],
-      employees_capacity: [],
-      daily_customers: [],
-      weekly_customers: []
-    };
-    let lastTimestamp = null;
-    await cursor.forEach(doc => {
-      if (!doc || !doc.company || !doc.timestamp) return;
-      const p = doc.company;
-      lastTimestamp = doc.timestamp;
-      push(series.daily_income, doc.timestamp, p.daily_income);
-      push(series.weekly_income, doc.timestamp, p.weekly_income);
-      push(series.employees_hired, doc.timestamp, p.employees_hired);
-      push(series.employees_capacity, doc.timestamp, p.employees_capacity);
-      push(series.daily_customers, doc.timestamp, p.daily_customers);
-      push(series.weekly_customers, doc.timestamp, p.weekly_customers);
-    });
-    // Classement simple des métriques par dernière valeur
-    const metricsRank = Object.keys(series).map(k => {
-      const arr = series[k];
-      const last = arr.length ? arr[arr.length - 1].v : 0;
-      return { metric: k, lastValue: last };
-    }).sort((a,b) => b.lastValue - a.lastValue);
-    const meta = { from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null };
-    try { socket.send(JSON.stringify({ ...respBase, ok:true, series, lastTimestamp, metricsRank, meta })); } catch {}
-  } catch(e) {
-    fastify.log.warn('[wsGetCompanyProfileHistory] failed: ' + e.message);
-    try { socket.send(JSON.stringify({ ...respBase, ok:false, error:e.message })); } catch {}
+    const series = {};
+    for (const [metric, points] of Object.entries(rawSeries)) {
+      const canonical = canonicalSeries(points);
+      if (canonical.length) series[metric] = canonical;
+    }
+    const metricsRank = Object.entries(series)
+      .map(([metric, points]) => ({ metric, lastValue: points.at(-1).v }))
+      .toSorted((left, right) => right.lastValue - left.lastValue || left.metric.localeCompare(right.metric));
+    sendJson(socket, withRequestId({
+      ...base,
+      ok: true,
+      series,
+      lastTimestamp: docs.length ? docs.at(-1).timestamp : null,
+      metricsRank,
+      meta: { from: range.from, to: range.to, points: docs.length },
+    }, parsed));
+  } catch (_) {
+    try { fastify?.log?.warn({ handler: 'getCompanyProfileHistory' }, 'company history unavailable'); } catch (_) {}
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'history_unavailable' }, parsed));
   }
 };
-
-function push(arr, t, raw) {
-  const n = Number(raw);
-  arr.push({ t, v: Number.isFinite(n) ? n : 0 });
-}

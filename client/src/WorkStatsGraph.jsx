@@ -117,6 +117,7 @@ export default function WorkStatsGraph({ logsUpdated, darkMode, chartHeight = 40
   const requestSentRef = useRef(false);
   const processedRangeRef = useRef(null);
   const lastSentRangeRef = useRef(null);
+  const lastRequestIdRef = useRef(null);
   const retryRef = useRef(0);
   const retryTimerRef = useRef(null);
   const lastProcessedIndexRef = useRef(0);
@@ -153,9 +154,11 @@ export default function WorkStatsGraph({ logsUpdated, darkMode, chartHeight = 40
       if (cancelled || requestSentRef.current || typeof sendWs !== 'function') return false;
       const to = Math.floor(Date.now() / 1000);
       const rangeKey = `${START_EPOCH}|${to}`;
+      const requestId = `company-train-range-${Date.now()}-${retryRef.current}`;
       lastSentRangeRef.current = rangeKey;
+      lastRequestIdRef.current = requestId;
       try {
-        sendWs(JSON.stringify({ type: 'companyTrainRange', from: START_EPOCH, to }));
+        sendWs(JSON.stringify({ type: 'companyTrainRange', from: START_EPOCH, to, requestId }));
         requestSentRef.current = true;
         return true;
       } catch (_) {
@@ -224,8 +227,8 @@ export default function WorkStatsGraph({ logsUpdated, darkMode, chartHeight = 40
         if (typeof raw !== 'string' || !raw.startsWith('{')) continue;
         let payload;
         try { payload = JSON.parse(raw); } catch (_) { continue; }
-        if (!payload || payload.type !== 'companyTrainRange') continue;
-        if (payload.error) {
+        if (!payload || payload.type !== 'companyTrainRange' || payload.requestId !== lastRequestIdRef.current) continue;
+        if (payload.ok === false || payload.error) {
           if (!statsMapRef.current.size) setStatus('error');
           continue;
         }
@@ -233,7 +236,7 @@ export default function WorkStatsGraph({ logsUpdated, darkMode, chartHeight = 40
         const from = Number.isSafeInteger(payload.from) ? payload.from : null;
         const to = Number.isSafeInteger(payload.to) ? payload.to : null;
         const rangeKey = from !== null && to !== null ? `${from}|${to}` : `payload:${index}`;
-        if (processedRangeRef.current === rangeKey) continue;
+        if (rangeKey !== lastSentRangeRef.current || processedRangeRef.current === rangeKey) continue;
         processedRangeRef.current = rangeKey;
         const normalized = payload.data.map(normalizeWorkStat).filter(Boolean);
         incoming.push(...normalized);

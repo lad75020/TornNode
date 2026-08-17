@@ -59,6 +59,9 @@ export default function useWsMessageBus(messages, handlers = {}) {
       case 'companyProfile':
         h.onCompanyProfile && h.onCompanyProfile(parsed);
         break;
+      case 'companyDetails':
+        h.onCompanyDetails && h.onCompanyDetails(parsed);
+        break;
       case 'getCompanyProfileHistory':
         h.onCompanyProfileHistory && h.onCompanyProfileHistory(parsed);
         break;

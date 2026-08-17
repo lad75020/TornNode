@@ -1,28 +1,40 @@
-// Handler companyProfile: récupère ou réutilise un snapshot (12h) des données profil compagnie
-// Pattern inspiré de wsCompanyStock (gating fetch + fallback stale)
-const fetchOrReuseSnapshot = require('../utils/fetchOrReuseSnapshot.cjs');
+'use strict';
 
-module.exports = async function wsCompanyProfile(socket, req, fastify) {
-  const respBase = { type: 'companyProfile' };
-  if (!req.session || !req.session.TornAPIKey) {
-    try { socket.send(JSON.stringify({ ...respBase, ok:false, error:'unauthorized' })); } catch {}
+const fetchOrReuseSnapshot = require('../utils/fetchOrReuseSnapshot.cjs');
+const { hasAuthenticatedCompanySession, sendJson, withRequestId } = require('../utils/companyAnalytics.cjs');
+
+module.exports = async function wsCompanyProfile(socket, req, fastify, parsed = {}) {
+  const base = { type: 'companyProfile' };
+  if (!hasAuthenticatedCompanySession(req)) {
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'unauthorized' }, parsed));
     return;
   }
-  const apiKey = req.session.TornAPIKey;
-  const url = `https://api.torn.com/company/111803?key=${apiKey}&comment=ReactTorn&selections=profile`;
-  const result = await fetchOrReuseSnapshot(fastify, {
-    collection: 'CompanyProfile',
-    url,
-    extract: j =>  j.company,
-    fieldName: 'company',
-    reuseWindowMs: 12*3600*1000,
-    databaseName: req.session.userId.toString()
-  });
-  if (result.error) {
-    try { socket.send(JSON.stringify({ ...respBase, ok:false, error: result.error })); } catch {}
-    return;
+  try {
+    const apiKey = req.session.TornAPIKey;
+    const result = await fetchOrReuseSnapshot(fastify, {
+      collection: 'CompanyProfile',
+      url: `https://api.torn.com/company/111803?key=${apiKey}&comment=ReactTorn&selections=profile`,
+      extract: response => response.company,
+      fieldName: 'company',
+      reuseWindowMs: 12 * 60 * 60 * 1000,
+      databaseName: String(req.session.userId),
+    });
+    if (result?.error) {
+      sendJson(socket, withRequestId({ ...base, ok: false, error: 'snapshot_unavailable' }, parsed));
+      return;
+    }
+    sendJson(socket, withRequestId({
+      ...base,
+      ok: true,
+      profile: result?.data ?? null,
+      timestamp: Number.isFinite(result?.timestamp) ? result.timestamp : null,
+      reused: Boolean(result?.reused),
+      inserted: Boolean(result?.inserted),
+      ...(result?.stale ? { stale: true } : {}),
+      ...(result?.data == null ? { empty: true } : {}),
+    }, parsed));
+  } catch (_) {
+    try { fastify?.log?.warn({ handler: 'companyProfile' }, 'company snapshot unavailable'); } catch (_) {}
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'snapshot_unavailable' }, parsed));
   }
-  const payload = { ...respBase, ok:true, profile: result.data, timestamp: result.timestamp, reused: !!result.reused, inserted: !!result.inserted };
-  if (result.stale) payload.stale = true;
-  try { socket.send(JSON.stringify(payload)); } catch {}
 };

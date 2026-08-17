@@ -77,7 +77,7 @@ module.exports = async function fetchOrReuseSnapshot(fastify, options) {
     const col = database.collection(collection);
     const debug = false;
     if (debug) {
-      try { fastify.log.info({ collection, url, fieldName, reuseWindowMs }, '[fetchOrReuseSnapshot] start'); } catch {}
+      try { fastify.log.info({ collection, fieldName, reuseWindowMs }, '[fetchOrReuseSnapshot] start'); } catch {}
     }
 
     const existing = await col.findOne({ timestamp: { $gte: windowStart } }, { projection: { _id:0 } });
@@ -112,18 +112,18 @@ module.exports = async function fetchOrReuseSnapshot(fastify, options) {
       }
     } catch(fetchErr) {
       // fallback dernier doc (stale)
-      if (debug) { try { fastify.log.warn({ err: String(fetchErr) }, '[fetchOrReuseSnapshot] fetch failed; trying fallback'); } catch {} }
+      if (debug) { try { fastify.log.warn({ collection }, '[fetchOrReuseSnapshot] fetch unavailable; trying fallback'); } catch {} }
       const fallback = await col.find({}, { projection: { _id:0 } }).sort({ timestamp:-1 }).limit(1).next();
       if (fallback && fallback[fieldName]) {
         if (debug) { try { fastify.log.info({ ts: fallback.timestamp }, '[fetchOrReuseSnapshot] returning stale fallback'); } catch {} }
         return { reused:true, inserted:false, stale:true, timestamp: fallback.timestamp, data: fallback[fieldName] };
       }
-      return { error: fetchErr.message || 'fetch_failed' };
+      return { error: 'fetch_failed' };
     }
     let data;
     try { data = extract(json); } catch(e) {
-      if (debug) { try { fastify.log.warn({ err: e.message }, '[fetchOrReuseSnapshot] extract failed'); } catch {} }
-      return { error:'extract_failed:'+e.message };
+      if (debug) { try { fastify.log.warn({ collection }, '[fetchOrReuseSnapshot] extract unavailable'); } catch {} }
+      return { error:'extract_failed' };
     }
     if (!data || typeof data !== 'object') {
       if (debug) { try { fastify.log.warn({ typeofData: typeof data }, '[fetchOrReuseSnapshot] invalid_data after extract'); } catch {} }
@@ -135,11 +135,11 @@ module.exports = async function fetchOrReuseSnapshot(fastify, options) {
       inserted = true;
       if (debug) { try { fastify.log.info({ collection, ts }, '[fetchOrReuseSnapshot] inserted snapshot'); } catch {} }
     } catch(dbErr) {
-      fastify.log.warn(`[fetchOrReuseSnapshot] insert warn ${collection}: ${dbErr.message}`);
+      try { fastify.log.warn({ collection }, '[fetchOrReuseSnapshot] insert unavailable'); } catch {}
     }
     return { reused:false, inserted, stale:false, timestamp: ts, data };
   } catch(e) {
-    if (process.env.SNAPSHOT_DEBUG) { try { fastify.log.error({ err: e.message }, '[fetchOrReuseSnapshot] fatal'); } catch {} }
-    return { error: e.message || 'internal_error' };
+    if (process.env.SNAPSHOT_DEBUG) { try { fastify.log.error({ collection }, '[fetchOrReuseSnapshot] unavailable'); } catch {} }
+    return { error: 'internal_error' };
   }
 };

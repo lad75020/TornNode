@@ -16,11 +16,12 @@ function createSocket() {
 function matches(document, filter = {}) {
   return Object.entries(filter).every(([field, condition]) => {
     const value = document[field];
-    if (condition && typeof condition === 'object' && ('$gte' in condition || '$lte' in condition || '$gt' in condition || '$lt' in condition)) {
+    if (condition && typeof condition === 'object' && ('$gte' in condition || '$lte' in condition || '$gt' in condition || '$lt' in condition || '$in' in condition)) {
       if ('$gte' in condition && !(value >= condition.$gte)) return false;
       if ('$lte' in condition && !(value <= condition.$lte)) return false;
       if ('$gt' in condition && !(value > condition.$gt)) return false;
       if ('$lt' in condition && !(value < condition.$lt)) return false;
+      if ('$in' in condition && (!Array.isArray(condition.$in) || !condition.$in.includes(value))) return false;
       return true;
     }
     return value === condition;
@@ -76,7 +77,9 @@ function createCollection(name, initial = []) {
 
 function createUserDatabase(initial = {}) {
   const collections = new Map();
-  for (const name of ['logs', 'attacks', 'Networth', 'Stats']) collections.set(name, createCollection(name, initial[name] || []));
+  for (const name of new Set(['logs', 'attacks', 'Networth', 'Stats', ...Object.keys(initial)])) {
+    collections.set(name, createCollection(name, initial[name] || []));
+  }
   return {
     collections,
     collection(name) {

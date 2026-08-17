@@ -1,42 +1,46 @@
-const fetchOrReuseSnapshot = require('../utils/fetchOrReuseSnapshot.cjs');
+'use strict';
 
-module.exports = async function wsCompanyDetails(socket, req, fastify, parsed) {
-  const respBase = { type: 'companyDetails' };
-  if (!req.session || !req.session.TornAPIKey) {
-    try { socket.send(JSON.stringify({ ...respBase, ok:false, error:'unauthorized' })); } catch {}
+const fetchOrReuseSnapshot = require('../utils/fetchOrReuseSnapshot.cjs');
+const { hasAuthenticatedCompanySession, sendJson, withRequestId } = require('../utils/companyAnalytics.cjs');
+
+module.exports = async function wsCompanyDetails(socket, req, fastify, parsed = {}) {
+  const base = { type: 'companyDetails' };
+  if (!hasAuthenticatedCompanySession(req)) {
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'unauthorized' }, parsed));
     return;
   }
-  const apiKey = req.session.TornAPIKey;
-  const url = `https://api.torn.com/company/111803?key=${apiKey}&comment=ReactTorn&selections=detailed`;
-  // Allow debug/force via parsed
-  const forceFetch = parsed && (parsed.force === true || parsed.forceFetch === true);
-  const reuseMinutes = parsed && Number.isFinite(parsed.reuseMinutes) && parsed.reuseMinutes >= 0 ? parsed.reuseMinutes : null;
-  const reuseWindowMs = forceFetch ? 0 : (reuseMinutes != null ? reuseMinutes*60*1000 : 12*3600*1000);
-  const result = await fetchOrReuseSnapshot(fastify, {
-    collection: 'CompanyDetails',
-    url,
-    extract: j => j.company_detailed,
-    fieldName: 'details',
-    reuseWindowMs,
-    databaseName: req.session.userId.toString()
-  });
-  if (result.error) {
-    try { socket.send(JSON.stringify({ ...respBase, ok:false, error: result.error })); } catch {}
-    return;
-  }
-  const payload = { ...respBase, ok:true, details: result.data, timestamp: result.timestamp, reused: !!result.reused, inserted: !!result.inserted };
-  if (result.stale) payload.stale = true;
-  // Optional debug info: count documents + known keys
-  if (parsed && parsed.debug) {
-    try {
-      const db = fastify.mongo.client.db('TORN');
-      const col = db.collection('CompanyDetails');
-      const count = await col.countDocuments();
-      const keys = result && result.data && typeof result.data === 'object' ? Object.keys(result.data) : [];
-      payload.debug = { count, keys };
-    } catch(e) {
-      payload.debug = { error: e.message };
+  const requestedMinutes = Number(parsed?.reuseMinutes);
+  const reuseWindowMs = parsed?.force === true || parsed?.forceFetch === true
+    ? 0
+    : Number.isFinite(requestedMinutes) && requestedMinutes >= 0 && requestedMinutes <= 720
+      ? requestedMinutes * 60 * 1000
+      : 12 * 60 * 60 * 1000;
+  try {
+    const apiKey = req.session.TornAPIKey;
+    const result = await fetchOrReuseSnapshot(fastify, {
+      collection: 'CompanyDetails',
+      url: `https://api.torn.com/company/111803?key=${apiKey}&comment=ReactTorn&selections=detailed`,
+      extract: response => response.company_detailed,
+      fieldName: 'details',
+      reuseWindowMs,
+      databaseName: String(req.session.userId),
+    });
+    if (result?.error) {
+      sendJson(socket, withRequestId({ ...base, ok: false, error: 'snapshot_unavailable' }, parsed));
+      return;
     }
+    sendJson(socket, withRequestId({
+      ...base,
+      ok: true,
+      details: result?.data ?? null,
+      timestamp: Number.isFinite(result?.timestamp) ? result.timestamp : null,
+      reused: Boolean(result?.reused),
+      inserted: Boolean(result?.inserted),
+      ...(result?.stale ? { stale: true } : {}),
+      ...(result?.data == null ? { empty: true } : {}),
+    }, parsed));
+  } catch (_) {
+    try { fastify?.log?.warn({ handler: 'companyDetails' }, 'company snapshot unavailable'); } catch (_) {}
+    sendJson(socket, withRequestId({ ...base, ok: false, error: 'snapshot_unavailable' }, parsed));
   }
-  try { socket.send(JSON.stringify(payload)); } catch {}
 };

@@ -1,49 +1,99 @@
 import { useEffect, useState, useRef } from 'react';
-import { getAllItemsFromIDB, writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
+import {
+  getAllItemsFromIDB,
+  isCompleteItem,
+  isItemsCatalogStale,
+  normalizeItemId,
+  writeItemsToIndexedDB,
+} from './syncItemsToIndexedDB.js';
 
 import { refreshPriceViaWs, handleUpdatePriceMessage } from './UpdatePrice.jsx';
 import useWsMessageBus from './hooks/useWsMessageBus.js';
 
+const SAFE_CATALOG_ERROR = 'Item catalog could not be loaded. Please retry.';
+const SAFE_PRICE_ERROR = 'Item price could not be updated. Please retry.';
+
+function validPrice(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function safeServerError(value, fallback) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  const knownSafeErrors = new Set([SAFE_CATALOG_ERROR, SAFE_PRICE_ERROR]);
+  return knownSafeErrors.has(normalized) ? normalized : fallback;
+}
 
 function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], sendWs, wsMessages, filterType = '' }) {
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState('');
   const [filtered, setFiltered] = useState([]);
   const [refreshingIds, setRefreshingIds] = useState(new Set());
+  const [catalogError, setCatalogError] = useState('');
   const lastClickRef = useRef(new Map()); // itemId -> timestamp
+  const catalogRequestRef = useRef(false);
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
-  // Initial load: read local IndexedDB then request fresh list via WebSocket
+  // Initial load: use the committed local snapshot, then request only when
+  // the snapshot is missing or older than the shared ten-minute policy.
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      catalogRequestRef.current = false;
+      return undefined;
+    }
     let cancelled = false;
+    const requestCatalog = () => {
+      if (catalogRequestRef.current) return;
+      if (typeof sendWs !== 'function') {
+        setCatalogError(SAFE_CATALOG_ERROR);
+        return;
+      }
+      catalogRequestRef.current = true;
+      setCatalogError('');
+      try {
+        sendWs(JSON.stringify({ type: 'getAllTornItems' }));
+      } catch (_) {
+        catalogRequestRef.current = false;
+        setCatalogError(SAFE_CATALOG_ERROR);
+      }
+    };
+
     (async () => {
       const localItems = await getAllItemsFromIDB();
-      if (!cancelled && localItems.length) {
-        setItems(localItems);
-        // Envoi différé uniquement si data locale trop ancienne (>10 min)
-        const lastSync = parseInt(localStorage.getItem('itemsLastSync')||'0',10);
-        const stale = Date.now() - lastSync > 10*60*1000;
-        if (stale) { try { if (sendWs) sendWs(JSON.stringify({ type:'getAllTornItems' })); } catch {} }
-      } else {
-        // Pas de données locales → requête immédiate
-        try { if (sendWs) sendWs(JSON.stringify({ type:'getAllTornItems' })); } catch {}
+      if (cancelled) return;
+      const validLocalItems = localItems.filter(isCompleteItem);
+      if (validLocalItems.length > 0) setItems(validLocalItems);
+      if (validLocalItems.length === 0 || isItemsCatalogStale()) requestCatalog();
+    })().catch(() => {
+      if (!cancelled) {
+        catalogRequestRef.current = false;
+        setCatalogError(SAFE_CATALOG_ERROR);
       }
-    })();
-    return () => { cancelled = true; };
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [token, sendWs]);
 
-  // Rafraîchir via événement storage (multi-tab) au lieu de polling
+  // Refresh the committed snapshot after another tab advances itemsLastSync.
   useEffect(() => {
-    if (!token) return;
+    if (!token) return undefined;
+    let cancelled = false;
     const onStorage = async (ev) => {
-      if (ev.key === 'itemsLastSync') {
-        const localItems = await getAllItemsFromIDB();
-        if (localItems.length) setItems(localItems);
+      if (ev.key !== 'itemsLastSync') return;
+      const localItems = await getAllItemsFromIDB();
+      if (cancelled) return;
+      const validLocalItems = localItems.filter(isCompleteItem);
+      if (validLocalItems.length > 0) {
+        setItems(validLocalItems);
+        setCatalogError('');
       }
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('storage', onStorage);
+    };
   }, [token]);
 
   // Debounce input
@@ -62,7 +112,10 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
     }
     // Otherwise, fall back to query-based filtering
     const q = debouncedQuery;
-    if (!q) { setFiltered(items.slice(0, 300)); return; }
+    if (!q) {
+      setFiltered(items.slice(0, 300));
+      return;
+    }
     const out = items.filter(item => {
       const name = (item && typeof item.name === 'string') ? item.name : '';
       return name.toLowerCase().startsWith(q);
@@ -73,15 +126,35 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
   // Écoute des messages WS via bus
   useWsMessageBus(wsMessages, {
     onUpdatePrice: (parsed) => {
-      if (parsed.ok && typeof parsed.id !== 'undefined' && typeof parsed.price === 'number') {
-        setItems(prev => prev.map(it => it.id === parsed.id ? { ...it, price: parsed.price } : it));
+      const normalizedId = normalizeItemId(parsed && parsed.id);
+      if (parsed && parsed.ok && normalizedId !== null && validPrice(parsed.price)) {
+        setItems(prev => prev.map(it => (
+          normalizeItemId(it.id) === normalizedId ? { ...it, price: parsed.price } : it
+        )));
+        setCatalogError('');
+      } else if (parsed && parsed.type === 'updatePrice' && parsed.ok === false) {
+        setCatalogError(safeServerError(parsed.error, SAFE_PRICE_ERROR));
       }
-      handleUpdatePriceMessage(parsed).catch(()=>{});
+      handleUpdatePriceMessage(parsed).catch(() => {});
     },
     onGetAllTornItems: async (parsed) => {
-      if (!parsed.ok || !Array.isArray(parsed.items)) return;
-      const result = await writeItemsToIndexedDB(parsed.items);
-      if (!result.error) setItems(parsed.items);
+      catalogRequestRef.current = false;
+      if (!parsed || parsed.ok !== true || !Array.isArray(parsed.items)) {
+        setCatalogError(safeServerError(parsed && parsed.error, SAFE_CATALOG_ERROR));
+        return;
+      }
+      const validItems = parsed.items.filter(isCompleteItem);
+      if (validItems.length === 0 || validItems.length !== parsed.items.length) {
+        setCatalogError(SAFE_CATALOG_ERROR);
+        return;
+      }
+      const result = await writeItemsToIndexedDB(validItems);
+      if (result.error || result.preserved) {
+        setCatalogError(SAFE_CATALOG_ERROR);
+        return;
+      }
+      setItems(validItems);
+      setCatalogError('');
     },
   });
 
@@ -91,7 +164,11 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
 
   return (
     <div style={{ margin: 20 }}>
-      
+      {catalogError && (
+        <div role="alert" style={{ color: '#842029', marginBottom: 8 }}>
+          {catalogError}
+        </div>
+      )}
       <input
         type="text"
         value={query}
@@ -100,9 +177,9 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
         style={{ padding: 8, width: 200 }}
       />
       {(query || (filterType && filterType.trim())) && (
-        <ul style={{ color: 'black',border: '1px solid #ccc', padding: 0, margin: 0, width: 200, position: 'absolute', background: '#fff', zIndex: 2000, maxHeight:300, overflowY:'auto' }}>
+        <ul style={{ color: 'black', border: '1px solid #ccc', padding: 0, margin: 0, width: 200, position: 'absolute', background: '#fff', zIndex: 2000, maxHeight: 300, overflowY: 'auto' }}>
           {filtered.length === 0 && (
-            <li style={{ listStyle:'none', padding:8, fontStyle:'italic', opacity:0.6 }}>Aucun résultat</li>
+            <li style={{ listStyle: 'none', padding: 8, fontStyle: 'italic', opacity: 0.6 }}>Aucun résultat</li>
           )}
           {(filterType ? filtered : filtered.slice(0, 300)).map(item => (
             <li
@@ -140,24 +217,32 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
                 />
               )}
               <span style={{ flex: 1 }}>
-                {(item.name || ('#'+item.id)) + (item.price != null ? (' $'+ item.price) : '')}
+                {(item.name || ('#' + item.id)) + (item.price != null ? (' $' + item.price) : '')}
               </span>
               <button
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   const now = Date.now();
-                  const last = lastClickRef.current.get(item.id) || 0;
+                  const normalizedId = normalizeItemId(item.id);
+                  const last = lastClickRef.current.get(normalizedId) || 0;
                   if (now - last < 2000) return; // debounce 2s
-                  lastClickRef.current.set(item.id, now);
+                  lastClickRef.current.set(normalizedId, now);
+                  setCatalogError('');
                   setRefreshingIds(prev => new Set(prev).add(item.id));
                   const p = refreshPriceViaWs(sendWs, item.id, { onSent: () => { /* hook futur */ } });
-                  Promise.resolve(p).finally(() => {
-                    setTimeout(() => setRefreshingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; }), 400);
+                  Promise.resolve(p).catch(() => {
+                    setCatalogError(SAFE_PRICE_ERROR);
+                  }).finally(() => {
+                    setTimeout(() => setRefreshingIds(prev => {
+                      const n = new Set(prev);
+                      n.delete(item.id);
+                      return n;
+                    }), 400);
                   });
                 }}
                 className="btn btn-link p-0 ms-2"
-                style={{ textDecoration:'none' }}
+                style={{ textDecoration: 'none' }}
                 title="Rafraîchir le prix"
               >
                 {refreshingIds.has(item.id) ? '⏳' : '🔄'}
@@ -165,11 +250,10 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
             </li>
           ))}
           {!filterType && filtered.length > 300 && (
-            <li style={{ listStyle:'none', padding:6, fontSize:11, color:'#555' }}>Showing first 300 of {filtered.length}</li>
+            <li style={{ listStyle: 'none', padding: 6, fontSize: 11, color: '#555' }}>Showing first 300 of {filtered.length}</li>
           )}
         </ul>
       )}
-      
     </div>
   );
 }

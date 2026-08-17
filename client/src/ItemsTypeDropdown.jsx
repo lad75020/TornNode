@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getAllItemsFromIDB } from './syncItemsToIndexedDB.js';
+import { getAllItemsFromIDB, isCompleteItem } from './syncItemsToIndexedDB.js';
 import useWsMessageBus from './hooks/useWsMessageBus.js';
 
 /**
@@ -13,20 +13,26 @@ export default function ItemsTypeDropdown({ wsMessages, onTypeChange, value }) {
   const [selected, setSelected] = useState(value || '');
 
   const computeTypes = (arr) => {
+    // Never replace known-good options with an empty or malformed snapshot.
+    if (!Array.isArray(arr) || arr.length === 0 || arr.some(item => !isCompleteItem(item))) {
+      return false;
+    }
+
     try {
       const s = new Set();
-      for (const it of Array.isArray(arr) ? arr : []) {
-        const t = it && typeof it.type === 'string' ? it.type.trim() : '';
-        if (t) s.add(t);
+      for (const item of arr) {
+        const type = typeof item.type === 'string' ? item.type.trim() : '';
+        if (type) s.add(type);
       }
       const out = Array.from(s).sort((a, b) => a.localeCompare(b));
       setTypes(out);
-      if (out.length > 0 && selected && !out.includes(selected)) {
+      if (selected && !out.includes(selected)) {
         setSelected('');
         try { onTypeChange && onTypeChange(''); } catch {}
       }
+      return true;
     } catch {
-      setTypes([]);
+      return false;
     }
   };
 
@@ -62,28 +68,31 @@ export default function ItemsTypeDropdown({ wsMessages, onTypeChange, value }) {
   // Live update on inbound WS items (optional)
   useWsMessageBus(wsMessages, {
     onGetAllTornItems: (parsed) => {
-      if (parsed && parsed.ok && Array.isArray(parsed.items)) computeTypes(parsed.items);
+      if (parsed && parsed.ok === true && Array.isArray(parsed.items)) {
+        computeTypes(parsed.items);
+      }
     }
   });
 
   const handleChange = (e) => {
-    const value = e.target.value;
-    setSelected(value);
-    try { onTypeChange && onTypeChange(value); } catch {}
+    const nextValue = e.target.value;
+    setSelected(nextValue);
+    try { onTypeChange && onTypeChange(nextValue); } catch {}
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <label className="form-label" style={{ fontSize: 12, marginBottom: 0 }}>Item Type</label>
+      <label htmlFor="item-type-filter" className="form-label" style={{ fontSize: 12, marginBottom: 0 }}>Item Type</label>
       <select
+        id="item-type-filter"
         className="form-select form-select-sm"
         value={selected}
         onChange={handleChange}
         style={{ minWidth: 220 }}
       >
         <option value="">All types</option>
-        {types.map(t => (
-          <option key={t} value={t}>{t}</option>
+        {types.map(type => (
+          <option key={type} value={type}>{type}</option>
         ))}
       </select>
     </div>

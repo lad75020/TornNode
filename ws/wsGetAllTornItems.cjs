@@ -7,6 +7,7 @@ const {
 const {
   SAFE_ERRORS,
   getAuthenticatedSession,
+  parseInteger,
   sendJson,
   logMessage,
 } = require('../utils/tornSyncHelpers.cjs');
@@ -16,10 +17,12 @@ const CACHE_CHUNK_SIZE = 200;
 
 function isCompleteItem(item) {
   if (!item || typeof item !== 'object') return false;
-  if (!Number.isSafeInteger(Number(item.id)) && typeof item.id !== 'string') return false;
+  const id = parseInteger(item.id);
+  if (id === null || id <= 0) return false;
   return REQUIRED_ITEM_FIELDS.every(field => item[field] !== undefined && item[field] !== null)
     && typeof item.name === 'string'
-    && typeof item.price === 'number'
+    && Number.isFinite(item.price)
+    && item.price >= 0
     && typeof item.img64 === 'string'
     && typeof item.description === 'string';
 }
@@ -144,7 +147,7 @@ module.exports = async function wsGetAllTornItems(socket, req, fastify) {
     const database = getCatalogDatabase(fastify);
     const itemsCollection = database.collection('Items');
     const documents = await itemsCollection.find({}, { projection: { _id: 0 } }).toArray();
-    if (!Array.isArray(documents) || documents.some(item => !isCompleteItem(item))) {
+    if (!Array.isArray(documents) || documents.length === 0 || documents.some(item => !isCompleteItem(item))) {
       throw new Error('authoritative item catalog is incomplete');
     }
     await writeCachedItems(redisClient, documents, fastify);

@@ -1,84 +1,149 @@
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-empty */
-module.exports = async function wsUpdatePrice(socket, req, fastify, parsed, redisClient, opts = {}) {
-  const { isTest = false } = opts;
+'use strict';
 
-  const { id, price: suppliedPrice } = parsed || {};
-  const idInt = parseInt(id);
-  if (!Number.isFinite(idInt)) {
-    try { socket.send(JSON.stringify({ type:'updatePrice', ok:false, error:'invalid id' })); } catch {}
+const {
+  SAFE_ERRORS,
+  getAuthenticatedSession,
+  parseInteger,
+  sendJson,
+  logMessage,
+} = require('../utils/tornSyncHelpers.cjs');
+const { ITEMS_KEY_PREFIX } = require('../utils/itemsCacheKey.cjs');
+
+const CACHE_TTL_SECONDS = 86400;
+
+function sendFailure(socket) {
+  sendJson(socket, {
+    type: 'updatePrice',
+    ok: false,
+    error: SAFE_ERRORS.ITEM_PRICE_UPDATE_FAILED,
+  });
+}
+
+function isValidPrice(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function getItemsDatabase(fastify) {
+  if (!fastify || !fastify.mongo) throw new Error('items database unavailable');
+  if (typeof fastify.mongo.db === 'function') return fastify.mongo.db('TORN');
+  if (fastify.mongo.client && typeof fastify.mongo.client.db === 'function') return fastify.mongo.client.db('TORN');
+  throw new Error('items database unavailable');
+}
+
+async function fetchMarketPrice(req, idInt) {
+  const authenticated = getAuthenticatedSession(req, { requireApiKey: true });
+  if (!authenticated.ok) throw new Error('market price authorization unavailable');
+
+  const { TornAPI } = require('torn-client');
+  const tornApiUrl = typeof process.env.TORN_API_URL === 'string'
+    ? process.env.TORN_API_URL.replace(/\/+$/, '')
+    : undefined;
+  const tornClient = new TornAPI({
+    apiKeys: [authenticated.apiKey],
+    ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
+  });
+  const data = await tornClient.market.withId(idInt).itemmarket({ offset: 0 });
+  const listings = data && data.itemmarket ? data.itemmarket.listings : null;
+  const firstListing = Array.isArray(listings) ? listings[0] : listings;
+  const price = firstListing && typeof firstListing === 'object' ? firstListing.price : undefined;
+  if (!isValidPrice(price)) throw new Error('market price unavailable');
+  return price;
+}
+
+async function updateRedisItem(redisClient, item, idInt, fastify) {
+  if (!redisClient || typeof redisClient.sendCommand !== 'function') return false;
+  const itemKey = `${ITEMS_KEY_PREFIX}${idInt}`;
+  try {
+    await redisClient.sendCommand(['JSON.SET', itemKey, '$', JSON.stringify(item)]);
+    if (typeof redisClient.expire === 'function') {
+      await redisClient.expire(itemKey, CACHE_TTL_SECONDS);
+    } else {
+      await redisClient.sendCommand(['EXPIRE', itemKey, String(CACHE_TTL_SECONDS)]);
+    }
+    return true;
+  } catch (error) {
+    logMessage(fastify, 'warn', 'item price cache update failed', { key: itemKey, error: error.message });
+    return false;
+  }
+}
+
+async function logPriceVariation(redisClient, idInt, price, fastify) {
+  if (!redisClient || typeof redisClient.rPush !== 'function') return;
+  try {
+    try {
+      const { lastMinPrices } = require('./priceState.cjs');
+      lastMinPrices.set(idInt, price);
+    } catch (_) {}
+
+    const now = new Date();
+    const dayKey = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
+    const listKey = `pricevars:${dayKey}:${idInt}`;
+    await redisClient.rPush(listKey, JSON.stringify({ t: now.toISOString(), p: price }));
+    if (typeof redisClient.ttl === 'function' && typeof redisClient.expire === 'function') {
+      const ttl = await redisClient.ttl(listKey);
+      if (ttl === -1) await redisClient.expire(listKey, 60 * 60 * 24 * 3);
+    }
+  } catch (error) {
+    logMessage(fastify, 'debug', 'item price variation log failed', { error: error.message });
+  }
+}
+
+module.exports = async function wsUpdatePrice(socket, req, fastify, parsed, redisClient) {
+  const auth = getAuthenticatedSession(req);
+  const idInt = parseInteger(parsed && parsed.id);
+  if (!auth.ok || idInt === null || idInt <= 0) {
+    sendFailure(socket);
     return;
   }
-  try {
-  // Items restent globaux (database partagée 'TORN')
-  const database = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db('TORN') : fastify.mongo.client.db('TORN'));
-    const itemsCollection = database.collection('Items');
-    let price;
-    if (typeof suppliedPrice === 'number' && suppliedPrice >= 0) {
-      price = Math.floor(suppliedPrice);
-    } else {
-      // Fallback to env API key if none in session (public flows)
-      const apiKey = (req && req.session && req.session.TornAPIKey) || process.env.TORN_API_KEY;
-      if (!apiKey) {
-        throw new Error('Missing Torn API key');
-      }
-      const { TornAPI } = require('torn-client');
-      const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
-      const tornClient = new TornAPI({
-        apiKeys: [apiKey],
-        ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
-      });
-      const data = await tornClient.market.withId(idInt).itemmarket({ offset: 0 });
-      const listings = data && data.itemmarket ? data.itemmarket.listings : null;
-      if (Array.isArray(listings)) price = listings[0] && typeof listings[0] === 'object' ? listings[0].price : undefined;
-      else if (listings && typeof listings === 'object') price = listings.price;
-    }
-    if (typeof price === 'number') {
-      await itemsCollection.updateOne({ id: idInt }, { $set: { price } }, { upsert: false });
-    }
-    const item = await itemsCollection.findOne({ id: idInt }) || { id: idInt, price };
 
-    const { ITEMS_KEY_PREFIX } = require('../utils/itemsCacheKey.cjs');
-    const itemKey = `${ITEMS_KEY_PREFIX}${idInt}`;
-    let cacheUpdated = false;
-    try {
-      if (item) {
-        await redisClient.sendCommand(['JSON.SET', itemKey, '$', JSON.stringify(item)]);
-        cacheUpdated = true;
-      } else if (typeof price === 'number') {
-        await redisClient.sendCommand(['JSON.SET', itemKey, '$.price', JSON.stringify(price)]);
-        cacheUpdated = true;
-      }
-    } catch (e) {
-      fastify.log.warn(`[wsUpdatePrice] JSON.SET fail key=${itemKey} err=${e.message}`);
+  const hasSuppliedPrice = Boolean(
+    parsed && Object.prototype.hasOwnProperty.call(parsed, 'price') && parsed.price !== undefined,
+  );
+
+  try {
+    const price = hasSuppliedPrice
+      ? parsed.price
+      : await fetchMarketPrice(req, idInt);
+    if (!isValidPrice(price)) {
+      throw new Error('invalid price');
     }
-    if (cacheUpdated) { try { await redisClient.expire(itemKey, 86400); } catch {} }
-    try { socket.send(JSON.stringify({ type:'updatePrice', ok:true, id:item.id, price: typeof price==='number'?price:null, cache: cacheUpdated?'json':'miss-json' })); } catch {}
-    // Log raw price variation for daily averaging (store ALL variations for the day)
-    try {
-      if (typeof price === 'number' && redisClient ) {
-  // MAJ du cache partagé lastMinPrices pour éviter double log juste après via wsBazaarPrice
-  try { const { lastMinPrices } = require('./priceState.cjs'); lastMinPrices.set(idInt, price); } catch(_){ }
-        const now = new Date();
-        // Use UTC date for consistency
-        const y = now.getUTCFullYear();
-        const m = String(now.getUTCMonth()+1).padStart(2,'0');
-        const d = String(now.getUTCDate()).padStart(2,'0');
-        const dayKey = `${y}${m}${d}`; // YYYYMMDD
-        const listKey = `pricevars:${dayKey}:${idInt}`;
-        // Push JSON with timestamp and price so we could do other stats later if needed
-        await redisClient.rPush(listKey, JSON.stringify({ t: now.toISOString(), p: price }));
-        // Ensure key expires after 3 days to avoid buildup if cleanup fails
-        // Set expire only if not already set (> 0 TTL)
-        try {
-          const ttl = await redisClient.ttl(listKey);
-          if (ttl === -1) { // no expire
-            await redisClient.expire(listKey, 60 * 60 * 24 * 3);
-          }
-        } catch {}
-      }
-  } catch(e) { fastify?.log && fastify.log.debug && fastify.log.debug(`[wsUpdatePrice] variation log fail ${e.message}`); }
-  } catch (e) {
-    try { socket.send(JSON.stringify({ type:'updatePrice', ok:false, error:e.message })); } catch {}
+
+    const database = getItemsDatabase(fastify);
+    const itemsCollection = database.collection('Items');
+    const existingItem = await itemsCollection.findOne({ id: idInt });
+    if (!existingItem) throw new Error('target item unavailable');
+
+    const updateResult = await itemsCollection.updateOne(
+      { id: idInt },
+      { $set: { price } },
+      { upsert: false },
+    );
+    if (!updateResult || Number(updateResult.matchedCount) !== 1) {
+      throw new Error('target item was not updated');
+    }
+
+    const item = await itemsCollection.findOne({ id: idInt });
+    if (!item) throw new Error('updated item unavailable');
+
+    const cacheItem = { ...item, price };
+    const cacheUpdated = await updateRedisItem(redisClient, cacheItem, idInt, fastify);
+    await logPriceVariation(redisClient, idInt, price, fastify);
+
+    sendJson(socket, {
+      type: 'updatePrice',
+      ok: true,
+      id: idInt,
+      price,
+      cache: cacheUpdated ? 'json' : 'miss-json',
+    });
+  } catch (error) {
+    logMessage(fastify, 'warn', 'item price update failed', {
+      userId: auth.userId,
+      id: idInt,
+      error: error.message,
+    });
+    sendFailure(socket);
   }
 };
+
+module.exports.isValidPrice = isValidPrice;

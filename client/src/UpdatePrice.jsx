@@ -1,33 +1,49 @@
-// Nouvelle version: nécessite passage d'une fonction sendWs et écoute des messages wsMain.messages côté appelant.
-import { writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
+import {
+  getAllItemsFromIDB,
+  isCompleteItem,
+  normalizeItemId,
+  writeItemsToIndexedDB,
+} from './syncItemsToIndexedDB.js';
+
+function isValidPrice(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
 
 export function refreshPriceViaWs(sendWs, itemId, opts = {}) {
   const { onSent } = opts;
+  const normalizedId = normalizeItemId(itemId);
+  if (normalizedId === null || typeof sendWs !== 'function') return undefined;
+
   try {
-    // Utiliser bypassUpdatePrice pour autoriser l'envoi bloqué par le wrapper
-    if (typeof sendWs === 'function') {
-      const payload = { type:'updatePrice', id: itemId };
-      // Certains wrappers acceptent (data, opts)
-      const maybe = sendWs(JSON.stringify(payload), { bypassUpdatePrice: true });
-      if (onSent) try { onSent(payload); } catch {}
-      return maybe;
+    const payload = { type: 'updatePrice', id: normalizedId };
+    const maybe = sendWs(JSON.stringify(payload), { bypassUpdatePrice: true });
+    if (onSent) {
+      try { onSent(payload); } catch {}
     }
+    return maybe;
   } catch {}
+  return undefined;
 }
 
-// Helper pour traiter un message updatePrice et maj IDB local (appelé depuis Autocomplete au parsing WS)
+// Process a successful updatePrice response and update only its matching local row.
 export async function handleUpdatePriceMessage(parsed) {
-  if (!parsed || parsed.type !== 'updatePrice' || !parsed.ok || typeof parsed.id === 'undefined') return;
-  if (typeof parsed.price !== 'number') return;
-  // Lire items existants, mettre à jour un seul et ré-écrire (petit volume acceptable)
+  if (!parsed || parsed.type !== 'updatePrice' || parsed.ok !== true) return;
+
+  const normalizedId = normalizeItemId(parsed.id);
+  if (normalizedId === null || !isValidPrice(parsed.price)) return;
+
   try {
-  const { getAllItemsFromIDB } = await import('./syncItemsToIndexedDB.js');
     const items = await getAllItemsFromIDB();
     let changed = false;
-    const updated = items.map(it => {
-      if (it.id === parsed.id) { changed = true; return { ...it, price: parsed.price }; }
-      return it;
+    const updated = items.map((item) => {
+      if (normalizeItemId(item && item.id) !== normalizedId) return item;
+      const candidate = { ...item, id: normalizedId, price: parsed.price };
+      if (!isCompleteItem(candidate)) return item;
+      changed = true;
+      return candidate;
     });
-    if (changed) await writeItemsToIndexedDB(updated);
+
+    if (!changed) return;
+    return await writeItemsToIndexedDB(updated);
   } catch {}
 }

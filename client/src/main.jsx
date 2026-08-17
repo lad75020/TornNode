@@ -29,7 +29,6 @@ import './chartSetup.js';
 const Autocomplete = lazy(() => import('./Autocomplete.jsx'));
 const ItemsTypeDropdown = lazy(() => import('./ItemsTypeDropdown.jsx'));
 import { handleStoreLogs } from './storeLogsToIndexedDB.jsx';
-import { writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
 const LogsGraph = lazy(() => import('./LogsGraph.jsx'));
 const CrimeScatterGraph = lazy(() => import('./CrimeScatterGraph.jsx'));
 const XanaxBarGraph = lazy(() => import('./XanaxBarGraph.jsx'));
@@ -681,30 +680,11 @@ function Main() {
     }
   }, [wsMain.status, wsMain.send]);
 
-  // Sync Items via WebSocket: envoie une requête 'getAllTornItems' puis écrit la réponse dans l'IDB
-  const itemsSyncingRef = useRef(false);
-  useEffect(() => {
-    if (!token) return;
-    let mounted = true;
-    const requestItems = () => {
-      if (!mounted || itemsSyncingRef.current) return;
-      itemsSyncingRef.current = true;
-      try { wsMain.send(JSON.stringify({ type: 'getAllTornItems' })); } catch { itemsSyncingRef.current = false; }
-    };
-    requestItems();
-    const id = setInterval(requestItems, 5 * 60 * 1000);
-    return () => { mounted = false; clearInterval(id); };
-  }, [token]);
+  // Item catalog synchronization is owned by the Item Prices view. It reads
+  // IndexedDB first and requests only when the local snapshot is missing/stale.
 
-  // Écoute des réponses getAllTornItems pour mise à jour IDB
   // Bus de messages WS centralisé
   useWsMessageBus(wsMain.messages, {
-    onGetAllTornItems: (msg) => {
-      if (msg.ok && Array.isArray(msg.items)) {
-        writeItemsToIndexedDB(msg.items);
-      }
-      itemsSyncingRef.current = false;
-    },
     onManualLogs: (parsed) => {
       if (parsed.error === 'cooldown' && parsed.phase === 'ignored') {
         return;

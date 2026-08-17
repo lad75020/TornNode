@@ -1,7 +1,7 @@
 analyzed_at: "2026-08-06T18:39:20Z"
 project_root: "/Volumes/WDBlack4TB/Code/tornnode"
-total_features: 11
-completed: 3
+total_features: 10
+completed: 5
 features:
   - id: "authentication-and-sessions"
     name: "Authentication and Sessions"
@@ -92,12 +92,12 @@ features:
       - "ws/wsUpdatePrice.cjs"
       - "utils/warmupItemsCache.cjs"
       - "utils/itemsCacheKey.cjs"
-    status: pending # pending | in-progress | done | skipped
+    status: done # pending | in-progress | done | skipped
     current_phase: null # null | specify | clarify | plan | tasks | implement
-    branch: null
-    pushed: null # null | true | false
-    started_at: null
-    completed_at: null
+    branch: "feature/time-machine-item-catalog-and-pricing"
+    pushed: true # null | true | false
+    started_at: "2026-08-17T19:56:10Z"
+    completed_at: "2026-08-17T20:33:35Z"
 
   - id: "bazaar-monitoring"
     name: "Bazaar Monitoring"

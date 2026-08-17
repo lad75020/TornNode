@@ -9,6 +9,7 @@ const SAFE_ERRORS = Object.freeze({
   LOG_RETRIEVAL_FAILED: 'Log retrieval could not be completed. Please retry.',
   ATTACK_RETRIEVAL_FAILED: 'Attack retrieval could not be completed. Please retry.',
   ITEM_CATALOG_FAILED: 'Item catalog could not be loaded. Please retry.',
+  ITEM_PRICE_UPDATE_FAILED: 'Item price could not be updated. Please retry.',
   SOCKET_UNUSABLE: 'The connection is no longer available.',
 });
 

@@ -150,7 +150,7 @@ description: "Dependency-ordered tasks for Torn data synchronization"
 - [x] T044 [P] [US3] Run `node --test` for all new synchronization tests and the existing authentication/WebSocket regression tests; record real failures for correction rather than masking them.
 - [x] T045 [P] [US4] Run `npm run build` and document the credential requirement for the Playwright/browser smoke flow from `specs/003-torn-data-synchronization/quickstart.md`; do not run the repository's live smoke spec with embedded credentials in this environment.
 - [x] T046 [US5] Run `git diff --check`, verify no API credential appears in changed responses/logging, and verify the pre-existing `.gitignore` `.DS_Store` modification is preserved.
-- [ ] T047 [US1] Update the Time Machine queue entry to `current_phase: implement` only after all task implementation and verification work is ready to begin; mark the feature `done` only after the implementation commit is verified.
+- [x] T047 [US1] Update the Time Machine queue entry to `current_phase: implement` only after all task implementation and verification work is ready to begin; mark the feature `done` only after the implementation commit is verified.
 
 ## Dependencies & Execution Order
 

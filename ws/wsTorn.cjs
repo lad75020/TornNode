@@ -1,247 +1,248 @@
+'use strict';
+
+const { TornAPI } = require('torn-client');
+const getUserDb = require('../utils/getUserDb.cjs');
+const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
+const {
+  DEFAULT_LOG_START,
+  SAFE_ERRORS,
+  getAuthenticatedSession,
+  parseRange,
+  sendJson,
+  socketUsable,
+  isDuplicateError,
+  sleep,
+  withRetries,
+  logMessage,
+} = require('../utils/tornSyncHelpers.cjs');
+
+const WINDOW_SECONDS = 900;
+const DEFAULT_SEGMENT_DELAY_MS = 1500;
+
+function createClient(apiKey, options = {}) {
+  if (options.tornClient) return options.tornClient;
+  const tornApiUrl = typeof process.env.TORN_API_URL === 'string'
+    ? process.env.TORN_API_URL.replace(/\/+$/, '')
+    : undefined;
+  return new TornAPI({ apiKeys: [apiKey], ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}) });
+}
+
+function normalizeLog(raw, sourceId) {
+  if (!raw || typeof raw !== 'object') return null;
+  const timestamp = Number(raw.timestamp);
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) return null;
+  const stableId = raw.id ?? raw._id ?? sourceId;
+  if (stableId === undefined || stableId === null || String(stableId).trim() === '') return null;
+
+  const value = { ...raw, _id: String(stableId), timestamp, date: new Date(timestamp * 1000) };
+  delete value.id;
+  if (value.details && typeof value.details === 'object') {
+    value.log = value.details.id ?? value.log;
+    value.title = value.details.title ?? value.title;
+    value.category = value.details.category ?? value.category;
+    delete value.details;
+  }
+  return value;
+}
+
+async function enrichItemNames(value, fastify) {
+  if (!value || (value.log !== 9020 && !(value.data && value.data.log === 9020))) return;
+  const itemsGained = value.data && value.data.items_gained;
+  if (!itemsGained || typeof itemsGained !== 'object') return;
+  const ids = Array.isArray(itemsGained)
+    ? itemsGained.map(item => Number(item && (item.id ?? item.item_id))).filter(Number.isSafeInteger)
+    : Object.keys(itemsGained).map(id => Number(id)).filter(Number.isSafeInteger);
+  const redis = fastify && fastify.redis;
+  if (!redis || ids.length === 0) return;
+
+  const { ITEMS_KEY_PREFIX } = require('../utils/itemsCacheKey.cjs');
+  const names = [];
+  for (const id of ids) {
+    try {
+      const raw = await redis.sendCommand(['JSON.GET', `${ITEMS_KEY_PREFIX}${id}`, '$.name']);
+      if (typeof raw !== 'string' || raw.length === 0) continue;
+      const parsed = JSON.parse(raw);
+      const name = Array.isArray(parsed) ? parsed[0] : parsed;
+      if (typeof name === 'string' && name.trim()) names.push(name);
+    } catch (_) {}
+  }
+  const unique = [...new Set(names)];
+  value.data = { ...(value.data || {}), items_names: unique };
+}
+
+async function insertLog(collection, value) {
+  try {
+    await collection.insertOne(value);
+    return true;
+  } catch (error) {
+    if (isDuplicateError(error)) return false;
+    throw error;
+  }
+}
+
 module.exports = async function wsTorn(socket, req, fastify, options = {}) {
-try {
-    const { TornAPI } = require('torn-client');
-    const fromNum = Number(options && options.from);
-    const toNum = Number(options && options.to);
-    const fromOverride = Number.isFinite(fromNum) ? Math.floor(fromNum) : null;
-    const toOverride = Number.isFinite(toNum) ? Math.floor(toNum) : null;
-    const dryRun = !!(options && options.dryRun);
-    const requestId = options && options.requestId != null ? String(options.requestId) : null;
-    const apiKey = req && req.session ? req.session.TornAPIKey : null;
-    if (!apiKey) {
-        if (dryRun) {
-            try { socket.send(JSON.stringify({ type: 'wsTornTestResult', ok: false, requestId, error: 'Invalid session: missing TornAPIKey' })); } catch {}
-        } else {
-            try { socket.send(JSON.stringify({ type:'importProgress', kind:'logs', error: 'Invalid session: missing TornAPIKey' })); } catch {}
-        }
-        return;
-    }
-    const tornApiUrl = typeof process.env.TORN_API_URL === 'string' ? process.env.TORN_API_URL.replace(/\/+$/, '') : undefined;
-    const tornClient = new TornAPI({
-        apiKeys: [apiKey],
-        ...(tornApiUrl ? { apiUrl: tornApiUrl } : {}),
-    });
+  const managedByRouter = options.managedByRouter === true;
+  const session = getAuthenticatedSession(req, { requireApiKey: true });
+  const requestId = options.requestId == null ? null : String(options.requestId);
 
-    if (dryRun) {
-        if (fromOverride == null || toOverride == null) {
-            try {
-                socket.send(JSON.stringify({
-                    type: 'wsTornTestResult',
-                    ok: false,
-                    requestId,
-                    error: 'from and to are required integers (unix seconds)'
-                }));
-            } catch {}
-            return;
-        }
-        if (fromOverride > toOverride) {
-            try {
-                socket.send(JSON.stringify({
-                    type: 'wsTornTestResult',
-                    ok: false,
-                    requestId,
-                    error: 'from must be <= to'
-                }));
-            } catch {}
-            return;
-        }
-        try {
-            fastify && fastify.log && fastify.log.info(`[wsTorn] dry-run logs from=${fromOverride} to=${toOverride}`);
-            const apiResponse = await tornClient.user.log({ from: fromOverride, to: toOverride });
-            let serializable = apiResponse;
-            try { serializable = JSON.parse(JSON.stringify(apiResponse)); } catch (_) {}
-            try {
-                socket.send(JSON.stringify({
-                    type: 'wsTornTestResult',
-                    ok: true,
-                    requestId,
-                    from: fromOverride,
-                    to: toOverride,
-                    response: serializable
-                }));
-            } catch {}
-        } catch (e) {
-            const errMsg = e && e.message ? e.message : String(e);
-            fastify && fastify.log && fastify.log.warn(`[wsTorn] dry-run request failed from=${fromOverride} to=${toOverride} ${errMsg}`);
-            try {
-                socket.send(JSON.stringify({
-                    type: 'wsTornTestResult',
-                    ok: false,
-                    requestId,
-                    from: fromOverride,
-                    to: toOverride,
-                    error: errMsg
-                }));
-            } catch {}
-        }
-        return;
+  if (!session.ok) {
+    // The router sets this guard before invoking the async handler. If the
+    // session expires between those two operations, release the guard here so
+    // the connection is not permanently wedged.
+    if (managedByRouter) {
+      socket.__importingLogs = false;
+      if (socket.__stopImport) delete socket.__stopImport.logs;
     }
+    sendJson(socket, options.dryRun
+      ? { type: 'wsTornTestResult', ok: false, requestId, error: SAFE_ERRORS.INVALID_SESSION }
+      : { type: 'importProgress', kind: 'logs', error: SAFE_ERRORS.INVALID_SESSION });
+    return;
+  }
 
-    const getUserDb = require('../utils/getUserDb.cjs');
-    const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-    await ensureUserDbStructure(fastify, req.session.userId, fastify && fastify.log);
-    const database = getUserDb(fastify, req);
-        // S'assurer des collections clés (créées sur demande par Mongo sinon).
-        const logsCollection = database.collection('logs');
-        // Future extension: pré-créer d'autres collections si nécessaire.
-        const nowSec = Math.floor(Date.now() / 1000);
-        const INTERVAL = 900; // 15 min
-        let startTs;
-        if (fromOverride != null) {
-            startTs = fromOverride;
-        } else {
-            let lastDoc = await logsCollection.findOne({}, { sort: { timestamp: -1 }, limit: 1 });
-            if (!lastDoc) {
-                // Fallback demandé: démarrer à timestamp fixe historique
-                lastDoc = { timestamp: 1716574649 };
-            }
-            startTs = lastDoc.timestamp + 1;
-        }
-        const endTs = toOverride != null ? toOverride : nowSec;
-        if (startTs > endTs) {
-            try { socket.send(JSON.stringify({ type:'importedData', logsImported: 0, note:'up-to-date'})); } catch {}
-            return;
-        }
-        let countInserted = 0;
-        let lastProgressSent = -5; // force première émission
-        for (let t = startTs; t <= endTs; t += INTERVAL) {
-            if (socket.__stopImport && socket.__stopImport.logs) {
-                try { socket.send(JSON.stringify({ type:'importStopped', kind:'logs', percent: null })); } catch {}
-                return;
-            }
-            const to = Math.min(t + INTERVAL, endTs);
-            let jsonLogs;
-            try {
-                fastify.log.info(`[wsTorn] fetching logs from=${t} to=${to}`);
-                jsonLogs = await tornClient.user.log({ from: t, to });
-            } catch (e) {
-                if (e && typeof e.code === 'number') {
-                    fastify && fastify.log && fastify.log.warn(`[wsTorn] API error code=${e.code} msg=${e.message}`);
-                    await new Promise(r => setTimeout(r, 10000));
-                    t -= INTERVAL;
-                    continue;
-                }
-                fastify && fastify.log && fastify.log.warn(`[wsTorn] request fail segment from=${t} to=${to} ${e.message}`);
-                continue;
-            }
-            if (jsonLogs && jsonLogs.error) {
-                fastify && fastify.log && fastify.log.warn(`[wsTorn] API error code=${jsonLogs.error.code} msg=${jsonLogs.error.error}`);
-                await new Promise(r => setTimeout(r, 10000));
-                t -= INTERVAL;
-                continue;
-            }
-            const logBlock = jsonLogs && jsonLogs.log ? jsonLogs.log : null;
-            if (logBlock && typeof logBlock === 'object') {
-                for (const [, value] of Object.entries(logBlock)) {
-                    if (!value || typeof value !== 'object') continue;
-                        // Validation minimale
-                    if (typeof value.timestamp !== 'number') continue;
-                    value.date = new Date(value.timestamp * 1000);
-                    value._id = value.id;
-                    if ((value.log === 9020) || (value.details && value.details.id === 9020)) {
-                        try {
-                            const itemsGained = value && value.data ? value.data.items_gained : null;
-                            // Collect numeric IDs from items_gained (object keys preferred; fallback to array of objects)
-                            let ids = [];
-                            if (itemsGained && typeof itemsGained === 'object' && !Array.isArray(itemsGained)) {
-                                ids = Object.keys(itemsGained).map(k => Number(k)).filter(n => Number.isFinite(n));
-                            } else if (Array.isArray(itemsGained)) {
-                                ids = itemsGained.map(it => Number(it && (it.id != null ? it.id : it.item_id))).filter(n => Number.isFinite(n));
-                            }
-                            const redis = fastify && fastify.redis;
-                            const names = [];
-                            if (redis && ids && ids.length) {
-                                const { ITEMS_KEY_PREFIX } = require('../utils/itemsCacheKey.cjs');
-                                let multi, canPipeline = false;
-                                try { multi = redis.multi(); canPipeline = !!multi; } catch (_) { canPipeline = false; }
-                                if (canPipeline) {
-                                    ids.forEach(id => {
-                                        const cmd = ['JSON.GET', `${ITEMS_KEY_PREFIX}${id}`, '$.name'];
-                                        if (typeof multi.addCommand === 'function') multi.addCommand(cmd); else multi.sendCommand(cmd);
-                                    });
-                                    const res = await multi.exec();
-                                    const arr = Array.isArray(res) ? res : [];
-                                    for (const r of arr) {
-                                        let v = Array.isArray(r) ? r[1] : r;
-                                        if (typeof v === 'string' && v.length) {
-                                            try {
-                                                const parsed = JSON.parse(v); // RedisJSON returns JSON string, e.g., ["Name"]
-                                                const nameVal = Array.isArray(parsed) ? parsed[0] : parsed;
-                                                if (typeof nameVal === 'string') names.push(nameVal);
-                                            } catch(_) {}
-                                        }
-                                    }
-                                } else {
-                                    // Fallback sequential
-                                    for (const id of ids) {
-                                        try {
-                                            const raw = await redis.sendCommand(['JSON.GET', `${ITEMS_KEY_PREFIX}${id}`, '$.name']);
-                                            if (typeof raw === 'string' && raw.length) {
-                                                const parsed = JSON.parse(raw);
-                                                const nameVal = Array.isArray(parsed) ? parsed[0] : parsed;
-                                                if (typeof nameVal === 'string') names.push(nameVal);
-                                            }
-                                        } catch(_) {}
-                                    }
-                                }
-                            }
-                            // Deduplicate and assign to value.data.items_names
-                            const seen = new Set();
-                            if (!value.data || typeof value.data !== 'object') value.data = {};
-                            value.data.items_names = names.filter(n => (n && (seen.has(n) ? false : (seen.add(n), true))));
-                        } catch (_) {
-                            try { if (!value.data) value.data = {}; value.data.items_names = []; } catch {}
-                        }
-                    }
-                    
-                    delete value.id;
-                    if (value.details) {
-                        value.log = value.details.id;
-                        value.title = value.details.title;
-                        value.category = value.details.category;
-                        delete value.details;
-                    }
-                    try { await logsCollection.insertOne(value); countInserted++; } catch(e){ /* duplicate ou autre */ }
-                }
-            }
-            const done = Math.min(to, endTs) - startTs;
-            const total = endTs - startTs || 1;
-            const percent = Math.min(100, (done / total) * 100);
-            if (percent - lastProgressSent >= 2 || percent >= 100) {
-                lastProgressSent = percent;
-                try { socket.send(JSON.stringify({ type:'importProgress', kind:'logs', percent: Number(percent.toFixed(1)), currentTs: to, startTs, endTs, inserted: countInserted })); } catch {}
-            }
-            // Petite pause pour réduire la charge et laisser respirer event loop
-            fastify.log.info(`[wsTorn] import progress ${percent}% from ${startTs} to ${endTs} imported : ${countInserted}`);
-                        // Pause + check stop après chaque segment
-                        for (let i=0;i<15;i++) { // 15 *100ms = 1.5s approx
-                            if (socket.__stopImport && socket.__stopImport.logs) {
-                                try { socket.send(JSON.stringify({ type:'importStopped', kind:'logs' })); } catch {}
-                                return;
-                            }
-                            await new Promise(r => setTimeout(r, 100));
-                        }
-        }
-            try { socket.send(JSON.stringify({ type:'importedData', logsImported: countInserted })); } catch {}
-            // Libère le verrou côté socket pour permettre tornAttacks puis déclenche si demandé
-            try {
-                const hadDeferred = socket.__deferredTornAttacks === true;
-                socket.__importingLogs = false;
-                if (hadDeferred) {
-                    socket.__deferredTornAttacks = false;
-                    // Déclenche immédiatement attaques maintenant que les logs sont prêts
-                    try { require('./wsTornAttacks.cjs')(socket, req, fastify); } catch(e){ fastify && fastify.log && fastify.log.error(e); }
-                }
-            } catch {}
+  if (options.dryRun) {
+    const range = parseRange(options, { defaultFrom: undefined, defaultTo: undefined });
+    if (!range.ok || options.from === undefined || options.to === undefined) {
+      sendJson(socket, { type: 'wsTornTestResult', ok: false, requestId, error: SAFE_ERRORS.INVALID_RANGE });
+      return;
+    }
+    try {
+      const client = createClient(session.apiKey, options);
+      const response = await client.user.log({ from: range.from, to: range.to });
+      let serializable = response;
+      try { serializable = JSON.parse(JSON.stringify(response)); } catch (_) {}
+      sendJson(socket, { type: 'wsTornTestResult', ok: true, requestId, from: range.from, to: range.to, response: serializable });
     } catch (error) {
-            try { socket.send(JSON.stringify({ type:'importProgress', kind:'logs', error: error.message })); } catch {}
-            try {
-                const hadDeferred = socket.__deferredTornAttacks === true;
-                socket.__importingLogs = false;
-                if (hadDeferred) {
-                    socket.__deferredTornAttacks = false;
-                    try { require('./wsTornAttacks.cjs')(socket, req, fastify); } catch(e){ fastify && fastify.log && fastify.log.error(e); }
-                }
-            } catch {}
+      logMessage(fastify, 'warn', 'Torn log dry-run failed', { requestId, error: error.message });
+      sendJson(socket, { type: 'wsTornTestResult', ok: false, requestId, error: SAFE_ERRORS.IMPORT_FAILED });
     }
+    return;
+  }
+
+  if (socket.__importingLogs && !managedByRouter) {
+    sendJson(socket, { type: 'importProgress', kind: 'logs', error: 'already_running', phase: 'rejected' });
+    return;
+  }
+  if (!managedByRouter) socket.__importingLogs = true;
+  socket.__stopImport = socket.__stopImport || {};
+  socket.__stopImport.logs = false;
+
+  let completed = false;
+  let stopped = false;
+  try {
+    const range = parseRange(options, {
+      defaultFrom: options.from === undefined ? DEFAULT_LOG_START : undefined,
+      defaultTo: options.to === undefined ? Math.floor(Date.now() / 1000) : undefined,
+    });
+    if (!range.ok) {
+      sendJson(socket, { type: 'importProgress', kind: 'logs', error: SAFE_ERRORS.INVALID_RANGE });
+      return;
+    }
+
+    const database = options.database || (await ensureUserDbStructure(fastify, session.userId, fastify && fastify.log), getUserDb(fastify, req));
+    const logsCollection = database.collection('logs');
+    const client = createClient(session.apiKey, options);
+    let startTs = range.from;
+    if (options.from === undefined) {
+      const lastDoc = await logsCollection.findOne({}, { sort: { timestamp: -1 }, limit: 1 });
+      const latest = lastDoc && Number(lastDoc.timestamp);
+      startTs = Number.isSafeInteger(latest) ? latest + 1 : DEFAULT_LOG_START;
+    }
+    const endTs = range.to;
+    if (startTs > endTs) {
+      sendJson(socket, { type: 'importedData', logsImported: 0, note: 'up-to-date' });
+      completed = true;
+      return;
+    }
+
+    const totalSeconds = Math.max(1, endTs - startTs + 1);
+    let inserted = 0;
+    let lastProgress = -1;
+    const retryDelayMs = options.retryDelayMs == null ? Number(process.env.TORN_IMPORT_RETRY_DELAY_MS || 10000) : Number(options.retryDelayMs);
+    const segmentDelayMs = options.segmentDelayMs == null ? DEFAULT_SEGMENT_DELAY_MS : Number(options.segmentDelayMs);
+
+    socket.__logsProgress = 0;
+    sendJson(socket, { type: 'importProgress', kind: 'logs', percent: 0, currentTs: startTs, startTs, endTs, inserted });
+    for (let windowStart = startTs; windowStart <= endTs; windowStart += WINDOW_SECONDS) {
+      if (socket.__stopImport.logs || !socketUsable(socket)) {
+        stopped = true;
+        sendJson(socket, { type: 'importStopped', kind: 'logs', startTs, endTs, inserted });
+        return;
+      }
+      const windowEnd = Math.min(endTs, windowStart + WINDOW_SECONDS - 1);
+      const response = await withRetries(
+        () => client.user.log({ from: windowStart, to: windowEnd }),
+        {
+          maxAttempts: options.maxAttempts == null ? 3 : Number(options.maxAttempts),
+          delayMs: retryDelayMs,
+          shouldStop: () => socket.__stopImport.logs || !socketUsable(socket),
+          onRetry: (error, attempt) => logMessage(fastify, 'warn', 'Torn log window retry', { from: windowStart, to: windowEnd, attempt, code: error && error.code }),
+        },
+      );
+      const logBlock = response && response.log && typeof response.log === 'object' ? response.log : {};
+      for (const [sourceId, raw] of Object.entries(logBlock)) {
+        const value = normalizeLog(raw, sourceId);
+        if (!value) continue;
+        await enrichItemNames(value, fastify);
+        if (await insertLog(logsCollection, value)) inserted += 1;
+      }
+      if (socket.__stopImport.logs || !socketUsable(socket)) {
+        stopped = true;
+        sendJson(socket, { type: 'importStopped', kind: 'logs', startTs, endTs, inserted });
+        return;
+      }
+
+      const currentTs = windowEnd;
+      const percent = Math.min(100, Math.max(0, ((currentTs - startTs + 1) / totalSeconds) * 100));
+      if (percent - lastProgress >= 2 || percent >= 100) {
+        lastProgress = percent;
+        socket.__logsProgress = percent;
+        sendJson(socket, {
+          type: 'importProgress',
+          kind: 'logs',
+          percent: Number(percent.toFixed(1)),
+          currentTs,
+          startTs,
+          endTs,
+          inserted,
+        });
+      }
+      if (segmentDelayMs > 0) {
+        await sleep(segmentDelayMs);
+      }
+    }
+
+    if (lastProgress < 100) {
+      sendJson(socket, { type: 'importProgress', kind: 'logs', percent: 100, currentTs: endTs, startTs, endTs, inserted });
+    }
+    sendJson(socket, { type: 'importedData', logsImported: inserted });
+    completed = true;
+  } catch (error) {
+    if (error && error.cancelled) {
+      stopped = true;
+      sendJson(socket, { type: 'importStopped', kind: 'logs' });
+    } else {
+      logMessage(fastify, 'warn', 'Torn log synchronization failed', { userId: session.userId, error: error.message });
+      sendJson(socket, { type: 'importProgress', kind: 'logs', error: SAFE_ERRORS.IMPORT_FAILED });
+    }
+  } finally {
+    socket.__importingLogs = false;
+    if (socket.__stopImport) delete socket.__stopImport.logs;
+    if (socket.__attacksWatchdog) {
+      clearTimeout(socket.__attacksWatchdog);
+      delete socket.__attacksWatchdog;
+    }
+    if (completed && !stopped && socket.__deferredTornAttacks) {
+      socket.__deferredTornAttacks = false;
+      socket.__autoTriggerAttacksAfterLogs = false;
+      try { await require('./wsTornAttacks.cjs')(socket, req, fastify); } catch (error) {
+        logMessage(fastify, 'warn', 'deferred attack synchronization failed', { error: error.message });
+      }
+    } else {
+      // A stopped/failed log job must not leave a deferred attack job behind.
+      socket.__deferredTornAttacks = false;
+      socket.__autoTriggerAttacksAfterLogs = false;
+    }
+  }
 };
+
+module.exports.normalizeLog = normalizeLog;

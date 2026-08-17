@@ -1,126 +1,160 @@
-module.exports = async function wsGetAllTornItems(socket, req, fastify, parsed) {
+'use strict';
 
-  const redisClient = fastify.redis;
-  const { ITEMS_KEY_PREFIX, REQUIRED_ITEM_FIELDS } = require('../utils/itemsCacheKey.cjs');
+const {
+  ITEMS_KEY_PREFIX,
+  REQUIRED_ITEM_FIELDS,
+} = require('../utils/itemsCacheKey.cjs');
+const {
+  SAFE_ERRORS,
+  getAuthenticatedSession,
+  sendJson,
+  logMessage,
+} = require('../utils/tornSyncHelpers.cjs');
+
+const CACHE_TTL_SECONDS = 86400;
+const CACHE_CHUNK_SIZE = 200;
+
+function isCompleteItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  if (!Number.isSafeInteger(Number(item.id)) && typeof item.id !== 'string') return false;
+  return REQUIRED_ITEM_FIELDS.every(field => item[field] !== undefined && item[field] !== null)
+    && typeof item.name === 'string'
+    && typeof item.price === 'number'
+    && typeof item.img64 === 'string'
+    && typeof item.description === 'string';
+}
+
+function unwrapRedisValue(value) {
+  if (Array.isArray(value) && value.length === 2 && (value[0] === null || value[0] instanceof Error || typeof value[0] === 'string')) return value[1];
+  return value;
+}
+
+function parseRedisItem(value) {
+  value = unwrapRedisValue(value);
+  if (typeof value !== 'string' || value.length === 0) return null;
   try {
-    let docs;
-    if (redisClient) {
-      const pattern = `${ITEMS_KEY_PREFIX}*`;
-      let cursor = '0';
-      const results = [];
-      try {
-        do {
-          let reply;
-          try { reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 400 }); }
-          catch { reply = await redisClient.scan(cursor, 'MATCH', pattern, 'COUNT', '400'); }
-          if (reply && Array.isArray(reply)) {
-            cursor = reply[0];
-            const keys = reply[1];
-            if (keys.length) {
-              const multi = redisClient.multi();
-              keys.forEach(k => multi.sendCommand(['JSON.GET', k, '$']));
-              const jsonRes = await multi.exec();
-              keys.forEach((k, idx) => {
-                let val = jsonRes[idx];
-                if (Array.isArray(val) && val.length === 2) val = val[1];
-                if (!val) return;
-                try {
-                  const parsed = JSON.parse(val);
-                  const obj = Array.isArray(parsed) ? parsed[0] : parsed;
-                  if (obj && typeof obj === 'object') results.push(obj);
-                } catch {}
-              });
-            }
-          } else if (reply && typeof reply === 'object') {
-            cursor = reply.cursor || '0';
-          } else {
-            cursor = '0';
-          }
-        } while (cursor !== '0');
-      } catch (e) {
-        fastify.log.warn('[wsGetAllTornItems] per-item scan fail '+e.message);
-      }
-      if (results.length) docs = results;
+    const parsed = JSON.parse(value);
+    const item = Array.isArray(parsed) ? parsed[0] : parsed;
+    return isCompleteItem(item) ? item : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function scanKeys(redisClient) {
+  const keys = [];
+  let cursor = '0';
+  do {
+    let reply;
+    try {
+      reply = await redisClient.scan(cursor, { MATCH: `${ITEMS_KEY_PREFIX}*`, COUNT: 400 });
+    } catch (_) {
+      reply = await redisClient.scan(cursor, 'MATCH', `${ITEMS_KEY_PREFIX}*`, 'COUNT', '400');
     }
-    const isIncomplete = docs && docs.some(it => !it || REQUIRED_ITEM_FIELDS.some(f => typeof it[f] === 'undefined'));
-    if (docs && !isIncomplete) {
-      try { socket.send(JSON.stringify({ type:'getAllTornItems', ok:true, items: docs })); } catch {}
+    if (Array.isArray(reply)) {
+      cursor = String(reply[0] ?? '0');
+      if (Array.isArray(reply[1])) keys.push(...reply[1]);
+    } else if (reply && typeof reply === 'object') {
+      cursor = String(reply.cursor ?? '0');
+      if (Array.isArray(reply.keys)) keys.push(...reply.keys);
+    } else {
+      cursor = '0';
+    }
+  } while (cursor !== '0');
+  return keys;
+}
+
+async function readCachedItems(redisClient) {
+  if (!redisClient || typeof redisClient.scan !== 'function') return null;
+  const keys = await scanKeys(redisClient);
+  if (keys.length === 0) return null;
+  const rawValues = [];
+  if (typeof redisClient.multi === 'function') {
+    const multi = redisClient.multi();
+    for (const key of keys) {
+      const command = ['JSON.GET', key, '$'];
+      if (typeof multi.addCommand === 'function') multi.addCommand(command);
+      else if (typeof multi.sendCommand === 'function') multi.sendCommand(command);
+    }
+    const result = await multi.exec();
+    if (Array.isArray(result)) rawValues.push(...result);
+  } else if (typeof redisClient.sendCommand === 'function') {
+    for (const key of keys) rawValues.push(await redisClient.sendCommand(['JSON.GET', key, '$']));
+  }
+  const items = rawValues.map(parseRedisItem).filter(Boolean);
+  if (items.length !== keys.length || items.some(item => !isCompleteItem(item))) return null;
+  return items;
+}
+
+function getCatalogDatabase(fastify) {
+  if (!fastify || !fastify.mongo) throw new Error('catalog database unavailable');
+  if (typeof fastify.mongo.db === 'function') return fastify.mongo.db('TORN');
+  if (fastify.mongo.client && typeof fastify.mongo.client.db === 'function') return fastify.mongo.client.db('TORN');
+  throw new Error('catalog database unavailable');
+}
+
+async function writeCachedItems(redisClient, documents, fastify) {
+  if (!redisClient || documents.length === 0) return;
+  for (let offset = 0; offset < documents.length; offset += CACHE_CHUNK_SIZE) {
+    const chunk = documents.slice(offset, offset + CACHE_CHUNK_SIZE);
+    if (typeof redisClient.multi === 'function') {
+      const multi = redisClient.multi();
+      for (const item of chunk) {
+        const key = `${ITEMS_KEY_PREFIX}${item.id}`;
+        const setCommand = ['JSON.SET', key, '$', JSON.stringify(item)];
+        const expireCommand = ['EXPIRE', key, String(CACHE_TTL_SECONDS)];
+        if (typeof multi.addCommand === 'function') {
+          multi.addCommand(setCommand);
+          multi.addCommand(expireCommand);
+        } else if (typeof multi.sendCommand === 'function') {
+          multi.sendCommand(setCommand);
+          multi.sendCommand(expireCommand);
+        }
+      }
+      await multi.exec();
+    } else if (typeof redisClient.sendCommand === 'function') {
+      for (const item of chunk) {
+        const key = `${ITEMS_KEY_PREFIX}${item.id}`;
+        await redisClient.sendCommand(['JSON.SET', key, '$', JSON.stringify(item)]);
+        try { await redisClient.sendCommand(['EXPIRE', key, String(CACHE_TTL_SECONDS)]); } catch (_) {}
+      }
+    }
+    logMessage(fastify, 'debug', 'item catalog cache repopulation progress', { sent: Math.min(offset + chunk.length, documents.length), total: documents.length });
+  }
+}
+
+module.exports = async function wsGetAllTornItems(socket, req, fastify) {
+  const session = getAuthenticatedSession(req, { requireApiKey: true });
+  if (!session.ok) {
+    sendJson(socket, { type: 'getAllTornItems', ok: false, error: SAFE_ERRORS.ITEM_CATALOG_FAILED });
+    return;
+  }
+
+  try {
+    const redisClient = fastify && fastify.redis;
+    let items = null;
+    try { items = await readCachedItems(redisClient); } catch (error) {
+      logMessage(fastify, 'warn', 'item catalog cache read failed', { error: error.message });
+    }
+    if (items && items.length > 0) {
+      sendJson(socket, { type: 'getAllTornItems', ok: true, items });
       return;
-    } else if (isIncomplete) {
-  fastify && fastify.log && fastify.log.info('[wsGetAllTornItems] Incomplete cache -> reload Mongo');
     }
-    // Mongo fallback + repopulate individual JSON keys (chunked & robust)
-  const database = (typeof fastify.mongo.db === 'function' ? fastify.mongo.db('TORN') : fastify.mongo.client.db('TORN'));
+
+    const database = getCatalogDatabase(fastify);
     const itemsCollection = database.collection('Items');
-    // Inclure explicitement les champs requis (si d'autres champs existent ils seront aussi conservés)
-    const documents = await itemsCollection.find({}, { projection: { _id:0 } }).toArray();
-    if (redisClient) {
-      const CHUNK_SIZE = 200;
-      let idx = 0;
-      let written = 0;
-      let errors = 0;
-      const total = documents.length;
-      const writeChunk = async (chunk) => {
-        if (!chunk.length) return;
-        let canPipeline = false; let multi;
-        try {
-          multi = redisClient.multi();
-          // ioredis: multi.addCommand n'existe pas; node-redis v4: multi.addCommand existe; fallback sur multi.sendCommand si présent
-          canPipeline = !!multi && (typeof multi.addCommand === 'function' || typeof multi.sendCommand === 'function');
-        } catch { canPipeline = false; }
-        if (canPipeline) {
-          for (const it of chunk) {
-            if (!it || typeof it.id === 'undefined') continue;
-            const k = `${ITEMS_KEY_PREFIX}${it.id}`;
-            const cmdArr = ['JSON.SET', k, '$', JSON.stringify(it)];
-            try {
-              if (typeof multi.addCommand === 'function') multi.addCommand(cmdArr); else multi.sendCommand(cmdArr);
-              // EXPIRE séparé (24h) – ne pas échouer si absent
-              const expCmd = ['EXPIRE', k, '86400'];
-              if (typeof multi.addCommand === 'function') multi.addCommand(expCmd); else multi.sendCommand(expCmd);
-            } catch (e) {
-              errors++; // compté comme erreur d'empilement
-            }
-          }
-          try {
-            const res = await multi.exec();
-            if (Array.isArray(res)) {
-              // Chaque item => 2 commandes (SET, EXPIRE). Compter SET succès.
-              // On parcourt par pas de 2.
-              for (let i=0;i<res.length;i+=2) {
-                const rSet = res[i];
-                if (rSet instanceof Error) errors++; else written++;
-              }
-            }
-          } catch (e) {
-            errors += chunk.length;
-            fastify.log.warn('[wsGetAllTornItems] pipeline exec fail '+e.message);
-          }
-        } else {
-          // Séquentiel
-            for (const it of chunk) {
-              if (!it || typeof it.id === 'undefined') continue;
-              const k = `${ITEMS_KEY_PREFIX}${it.id}`;
-              try {
-                await redisClient.sendCommand(['JSON.SET', k, '$', JSON.stringify(it)]);
-                try { await redisClient.sendCommand(['EXPIRE', k, '86400']); } catch {}
-                written++;
-              } catch (e) { errors++; }
-            }
-        }
-      };
-      while (idx < documents.length) {
-        const slice = documents.slice(idx, idx + CHUNK_SIZE);
-        await writeChunk(slice);
-        idx += CHUNK_SIZE;
-        if (idx % (CHUNK_SIZE*5) === 0) {
-          fastify.log.info(`[wsGetAllTornItems] repop progress ${idx}/${total}`);
-        }
-      }
-      fastify.log.info(`[wsGetAllTornItems] repop done total=${total} written=${written} errors=${errors}`);
+    const documents = await itemsCollection.find({}, { projection: { _id: 0 } }).toArray();
+    if (!Array.isArray(documents) || documents.some(item => !isCompleteItem(item))) {
+      throw new Error('authoritative item catalog is incomplete');
     }
-    try { socket.send(JSON.stringify({ type:'getAllTornItems', ok:true, items: documents })); } catch {}
-  } catch (e) {
-    try { socket.send(JSON.stringify({ type:'getAllTornItems', ok:false, error:e.message })); } catch {}
+    await writeCachedItems(redisClient, documents, fastify);
+    sendJson(socket, { type: 'getAllTornItems', ok: true, items: documents });
+  } catch (error) {
+    logMessage(fastify, 'warn', 'item catalog synchronization failed', { userId: session.userId, error: error.message });
+    sendJson(socket, { type: 'getAllTornItems', ok: false, error: SAFE_ERRORS.ITEM_CATALOG_FAILED });
   }
 };
+
+module.exports.isCompleteItem = isCompleteItem;
+module.exports.parseRedisItem = parseRedisItem;
+module.exports.readCachedItems = readCachedItems;

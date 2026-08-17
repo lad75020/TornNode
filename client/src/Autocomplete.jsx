@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { getAllItemsFromIDB } from './syncItemsToIndexedDB.js';
+import { getAllItemsFromIDB, writeItemsToIndexedDB } from './syncItemsToIndexedDB.js';
 
 import { refreshPriceViaWs, handleUpdatePriceMessage } from './UpdatePrice.jsx';
 import useWsMessageBus from './hooks/useWsMessageBus.js';
@@ -78,8 +78,10 @@ function Autocomplete({ token, onAuth, onWatch, onUnwatch, watchedItems = [], se
       }
       handleUpdatePriceMessage(parsed).catch(()=>{});
     },
-    onGetAllTornItems: (parsed) => {
-      if (parsed.ok && Array.isArray(parsed.items)) setItems(parsed.items);
+    onGetAllTornItems: async (parsed) => {
+      if (!parsed.ok || !Array.isArray(parsed.items)) return;
+      const result = await writeItemsToIndexedDB(parsed.items);
+      if (!result.error) setItems(parsed.items);
     },
   });
 

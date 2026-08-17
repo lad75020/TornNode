@@ -29,3 +29,4 @@ scripts/fetchClothingItems.js
 package-lock.json
 /.specify
 .env.keys
+.DS_Store

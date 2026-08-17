@@ -1,137 +1,203 @@
 import { openDB } from 'idb';
+import { invalidateAllCaches } from './dbLayer.js';
 
-// Gardes globales anti-boucle pour ingestion logs (évite relances infinies)
 let __logsIngestActive = false;
 let __lastLogsIngestEnd = 0;
 let __lastLogsIngestHadData = false;
 
-// Nouveau flux: écoute des messages WebSocket getAllTornLogs
-// handleStoreLogs(setStoreProgress, { ws, send, requestId }) déclenche une requête JSON et ingère les lots reçus
-export function handleStoreLogs(setStoreProgress, { ws, send, requestId: externalRequestId } = {}) {
+function progressValue(current, total, running) {
+  if (!total) return { current: 0, total: 0, percent: running ? 0 : 100, running };
+  return {
+    current: Math.min(current, total),
+    total,
+    percent: Math.min(100, Math.round(Math.min(current, total) / total * 100)),
+    running,
+  };
+}
+
+function decodeMessage(event) {
+  let data = event && event.data;
+  if (typeof data === 'string') return data;
+  if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
+  if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
+  return null;
+}
+
+/**
+ * Stream server log batches into IndexedDB. Every terminal path removes all
+ * listeners/timers and clears the in-memory concurrency guard.
+ */
+export function handleStoreLogs(setStoreProgress, {
+  ws,
+  send,
+  requestId: externalRequestId,
+  timeoutMs = 120000,
+  guardIntervalMs = 1500,
+} = {}) {
   return (async () => {
     const now = Date.now();
-    if (__logsIngestActive) { try { console.debug('[handleStoreLogs] abort: already active'); } catch {} return; }
-    if (!__lastLogsIngestHadData && (now - __lastLogsIngestEnd) < 5000) { try { console.debug('[handleStoreLogs] abort: cooldown after empty ingest'); } catch {} return; }
-    if (!ws || ws.readyState !== 1) {
-      console.warn('[handleStoreLogs] WebSocket indisponible');
-      setStoreProgress({ current: 0, total: 0, percent: 0, running: false });
+    if (__logsIngestActive) return;
+    if (!__lastLogsIngestHadData && now - __lastLogsIngestEnd < 5000) return;
+    if (!ws || ws.readyState !== undefined && ws.readyState !== 1) {
+      setStoreProgress({ current: 0, total: 0, percent: 0, running: false, error: 'WebSocket indisponible' });
       return;
     }
-    __logsIngestActive = true;
 
+    __logsIngestActive = true;
     const dbName = 'LogsDB';
     const storeName = 'logs';
-    setStoreProgress({ current: 0, total: 0, percent: 0, running: true });
-
-    // Trouver timestamp max
-    let from = 0;
-    const baseDb = await openDB(dbName, 2, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains(storeName)) {
-          const store = db.createObjectStore(storeName, { keyPath: '_id' });
-            store.createIndex('log', 'log');
-            store.createIndex('timestamp', 'timestamp');
-        }
-      }
-    });
-    try {
-      const tx0 = baseDb.transaction(storeName, 'readonly');
-      const idx = tx0.store.index('timestamp');
-      const cur = await idx.openCursor(null, 'prev');
-      if (cur) from = cur.value.timestamp + 1;
-      await tx0.done;
-    } catch {}
-
-    const requestId = externalRequestId || Math.random().toString(36).slice(2);
-    const payload = { type: 'getAllTornLogs', from, requestId };
-    try { (send || (m => ws.send(m)))(JSON.stringify(payload)); } catch(e) { console.error(e); setStoreProgress({ current:0,total:0,percent:0,running:false }); __logsIngestActive=false; return; }
-
-    let expectedTotal = 0;
-    let current = 0;
+    const id = externalRequestId == null || String(externalRequestId) === ''
+      ? Math.random().toString(36).slice(2)
+      : String(externalRequestId);
+    let db;
+    let guard;
+    let timeout;
+    let onMessage;
+    let onClose;
+    let onError;
+    let queue = Promise.resolve();
     let finished = false;
+    let started = false;
+    let current = 0;
+    let total = 0;
     let lastProgressTs = Date.now();
 
-    function finalize() {
-      if (!finished) { finished = true; }
-      setStoreProgress(prev => {
-        if (expectedTotal) {
-          const done = expectedTotal && current >= expectedTotal ? expectedTotal : current;
-          const pct = expectedTotal ? Math.min(100, Math.round(done / expectedTotal * 100)) : 100;
-          return { current: done, total: expectedTotal, percent: pct >= 100 ? 100 : pct, running: false };
-        }
-        return { current: 0, total: 0, percent: 100, running: false };
-      });
+    const cleanup = () => {
+      if (guard) clearInterval(guard);
+      if (timeout) clearTimeout(timeout);
+      try { if (onMessage) ws.removeEventListener('message', onMessage); } catch (_) {}
+      try { if (onClose) ws.removeEventListener('close', onClose); } catch (_) {}
+      try { if (onError) ws.removeEventListener('error', onError); } catch (_) {}
+    };
+
+    const finish = (success, error) => {
+      if (finished) return;
+      finished = true;
+      cleanup();
       __logsIngestActive = false;
       __lastLogsIngestEnd = Date.now();
       __lastLogsIngestHadData = current > 0;
-    }
-
-    const scheduleClear = () => {};
-
-    const onMessage = async (ev) => {
-      if (finished) return;
-      let data = ev.data;
-      if (typeof data !== 'string') { try { data = new TextDecoder().decode(data); } catch { return; } }
-      if (!data.startsWith('{')) return;
-      let parsed; try { parsed = JSON.parse(data); } catch { return; }
-      if (!parsed || parsed.type !== 'getAllTornLogs' || parsed.requestId !== requestId) return;
-      try { console.debug('[logsWS]', parsed.phase, parsed.sent, '/', parsed.total); } catch {}
-      if (parsed.phase === 'start') {
-        expectedTotal = parsed.total || 0;
-        if (expectedTotal === 0) {
-          finalize();
-          setStoreProgress({ current:0,total:0,percent:0,running:false });
-          cleanup(); scheduleClear();
-        } else {
-          setStoreProgress({ current:0,total:expectedTotal,percent:0,running:true });
-        }
-        return;
-      }
-      if (parsed.phase === 'batch' && Array.isArray(parsed.batch) && parsed.batch.length) {
-        try {
-          const tx = (await openDB(dbName, 2)).transaction(storeName, 'readwrite');
-          const st = tx.store;
-          for (const obj of parsed.batch) {
-            try { st.put(obj); } catch {}
-          }
-          await tx.done;
-        } catch(e) { console.error('[handleStoreLogs] write batch', e); }
-        current += parsed.batch.length;
-        lastProgressTs = Date.now();
-        setStoreProgress(prev => {
-          const pct = expectedTotal ? Math.min(100, Math.round(current / expectedTotal * 100)) : 0;
-          const complete = expectedTotal && current >= expectedTotal;
-          return { current, total: expectedTotal, percent: pct, running: !complete };
-        });
-        return;
-      }
-      if (parsed.phase === 'end') { finalize(); cleanup(); return; }
-      if (parsed.ok === false && parsed.error) {
-        finalize();
-        console.error('[handleStoreLogs] Erreur websocket:', parsed.error);
-        setStoreProgress({ current:0,total:0,percent:0,running:false });
-        cleanup(); scheduleClear(); return;
+      if (success) {
+        setStoreProgress(progressValue(total ? total : current, total, false));
+      } else {
+        setStoreProgress({ ...progressValue(current, total, false), percent: 0, error: error || 'Log synchronization failed' });
       }
     };
 
-    function cleanup() { try { ws.removeEventListener('message', onMessage); } catch {} }
-    ws.addEventListener('message', onMessage);
+    try {
+      setStoreProgress({ current: 0, total: 0, percent: 0, running: true });
+      db = await openDB(dbName, 2, {
+        upgrade(database, _oldVersion, _newVersion, transaction) {
+          let store;
+          if (!database.objectStoreNames.contains(storeName)) {
+            store = database.createObjectStore(storeName, { keyPath: '_id' });
+          } else {
+            store = transaction.objectStore(storeName);
+          }
+          if (!store.indexNames.contains('log')) store.createIndex('log', 'log');
+          if (!store.indexNames.contains('timestamp')) store.createIndex('timestamp', 'timestamp');
+        },
+      });
 
-    const guard = setInterval(() => {
-      if (finished) { clearInterval(guard); return; }
-  if (expectedTotal > 0 && current >= expectedTotal) {
-        console.warn('[handleStoreLogs] guard finalize (missing end)');
-        finalize();
-        setStoreProgress(prev => ({ current, total: expectedTotal, percent: 100, running:false }));
-        cleanup(); scheduleClear();
-      } else if (Date.now() - lastProgressTs > 30000 && expectedTotal === 0) {
-        console.warn('[handleStoreLogs] guard timeout without start');
-        finalize();
-        setStoreProgress({ current:0,total:0,percent:0,running:false });
-        cleanup(); scheduleClear();
+      let from = 0;
+      try {
+        const tx = db.transaction(storeName, 'readonly');
+        const index = tx.store.index('timestamp');
+        const cursor = await index.openCursor(null, 'prev');
+        if (cursor && Number.isFinite(cursor.value.timestamp)) from = Number(cursor.value.timestamp) + 1;
+        await tx.done;
+      } catch (_) {}
+
+      const sendMessage = send || (message => ws.send(message));
+      onMessage = event => {
+        queue = queue.then(async () => {
+          if (finished) return;
+          const raw = decodeMessage(event);
+          if (raw === null || !raw.trim().startsWith('{')) return;
+          let parsed;
+          try { parsed = JSON.parse(raw); } catch (_) {
+            finish(false, 'Malformed log synchronization message');
+            return;
+          }
+          if (!parsed || parsed.type !== 'getAllTornLogs' || String(parsed.requestId) !== id) return;
+          lastProgressTs = Date.now();
+          if (parsed.phase === 'start') {
+            if (!Number.isSafeInteger(Number(parsed.total)) || Number(parsed.total) < 0) {
+              finish(false, 'Invalid log synchronization total');
+              return;
+            }
+            total = Number(parsed.total);
+            started = true;
+            if (total === 0) finish(true);
+            else setStoreProgress(progressValue(0, total, true));
+            return;
+          }
+          if (parsed.ok === false && parsed.error) {
+            finish(false, 'Log synchronization failed');
+            return;
+          }
+          if (parsed.phase === 'batch') {
+            if (!started || !Array.isArray(parsed.batch) || parsed.batch.length === 0 || total === 0) {
+              finish(false, 'Invalid log synchronization batch');
+              return;
+            }
+            if (current + parsed.batch.length > total) {
+              finish(false, 'Log synchronization count mismatch');
+              return;
+            }
+            const tx = db.transaction(storeName, 'readwrite');
+            for (const record of parsed.batch) {
+              if (!record || record._id === undefined || record._id === null) {
+                finish(false, 'Invalid log synchronization record');
+                return;
+              }
+              await tx.store.put(record);
+            }
+            await tx.done;
+            current += parsed.batch.length;
+            invalidateAllCaches();
+            setStoreProgress(progressValue(current, total, current < total));
+            return;
+          }
+          if (parsed.phase === 'end') {
+            if (!started || current !== total || Number(parsed.sent) !== total) {
+              finish(false, 'Incomplete log synchronization');
+              return;
+            }
+            finish(true);
+          }
+        }).catch(error => finish(false, error && error.message ? error.message : 'Log synchronization failed'));
+        return queue;
+      };
+      onClose = () => finish(false, 'WebSocket closed during log synchronization');
+      onError = () => finish(false, 'WebSocket error during log synchronization');
+      ws.addEventListener('message', onMessage);
+      if (typeof ws.addEventListener === 'function') {
+        ws.addEventListener('close', onClose);
+        ws.addEventListener('error', onError);
       }
-    }, 1500);
 
-    setTimeout(() => { if (!finished) { console.warn('[handleStoreLogs] timeout'); finalize(); cleanup(); setStoreProgress({ current:0,total:0,percent:0,running:false }); } }, 120000);
+      setStoreProgress({ current: 0, total: 0, percent: 0, running: true });
+      await Promise.resolve(sendMessage(JSON.stringify({ type: 'getAllTornLogs', from, requestId: id })));
+      if (finished) return;
+
+      guard = setInterval(() => {
+        if (finished) return;
+        if (total > 0 && current >= total) {
+          finish(true);
+        } else if (Date.now() - lastProgressTs > Math.min(timeoutMs, 30000)) {
+          finish(false, 'Log synchronization timed out');
+        }
+      }, guardIntervalMs);
+      timeout = setTimeout(() => finish(false, 'Log synchronization timed out'), timeoutMs);
+    } catch (error) {
+      finish(false, error && error.message ? error.message : 'Log synchronization failed');
+    }
   })();
+}
+
+export function resetLogsIngestStateForTests() {
+  __logsIngestActive = false;
+  __lastLogsIngestEnd = 0;
+  __lastLogsIngestHadData = false;
 }

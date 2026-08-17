@@ -57,8 +57,12 @@ module.exports = (fastify, isTest) => {
                 if (!req.session) req.session = {};
                 if (!req.session.userID) {
                     const jwtUserId = normalizeUserId(getJwtUserId(req));
-                    if (jwtUserId != null) req.session.userID = jwtUserId;
+                    if (jwtUserId != null) {
+                        req.session.userID = jwtUserId;
+                        req.session.userId = jwtUserId;
+                    }
                 }
+                if (!req.session.userId && req.session.userID) req.session.userId = normalizeUserId(req.session.userID);
             } catch {}
 
             async function ensureSocketSession() {
@@ -68,7 +72,8 @@ module.exports = (fastify, isTest) => {
                     if (candidateUserId == null) return false;
 
                     if (!req.session) req.session = {};
-                    if (!req.session.userID) req.session.userID = candidateUserId;
+                    req.session.userID = candidateUserId;
+                    req.session.userId = candidateUserId;
 
                     if (!req.__wsSessionHydrationPromise) {
                         req.__wsSessionHydrationPromise = (async () => {
@@ -83,6 +88,7 @@ module.exports = (fastify, isTest) => {
                             }
 
                             req.session.userID = user.id;
+                            req.session.userId = user.id;
                             req.session.username = user.username;
                             req.session.userType = user.type;
                             req.session.TornAPIKey = user.TornAPIKey;
@@ -134,6 +140,14 @@ module.exports = (fastify, isTest) => {
 
             socket.on('close', (code, reason) => {
                 clearInterval(pingInterval);
+                socket.__stopImport = socket.__stopImport || {};
+                socket.__stopImport.logs = true;
+                socket.__stopImport.attacks = true;
+                socket.__deferredTornAttacks = false;
+                if (socket.__attacksWatchdog) {
+                    clearTimeout(socket.__attacksWatchdog);
+                    delete socket.__attacksWatchdog;
+                }
                 fastify.log.info(`[ws] close code=${code} reason=${reason}`);
             });
 
@@ -189,65 +203,37 @@ module.exports = (fastify, isTest) => {
                 switch (message) {
                     case 'torn':
                         fastify.log.info({ connId }, '[ws] torn command');
-                                                // Marquer l'état d'import logs + suivi progress
-                                                socket.__importingLogs = true;
-                                                socket.__logsProgress = 0;
-                                                socket.__logsImportStartedAt = Date.now();
-                                                // Wrapper pour intercepter les messages sortants progress  (monkey-patch temporaire send)
-                                                const origSend = socket.send.bind(socket);
-                                                socket.send = function patchedSend(payload, ...rest) {
-                                                    try {
-                                                        if (typeof payload === 'string' && payload.startsWith('{')) {
-                                                            try {
-                                                                const j = JSON.parse(payload);
-                                                                if (j && j.type === 'importProgress' && j.kind === 'logs' && typeof j.percent === 'number') {
-                                                                    socket.__logsProgress = j.percent;
-                                                                    if (socket.__logsProgress >= 100 && socket.__importingLogs) {
-                                                                        // Fin import logs: restaurer send
-                                                                        socket.__importingLogs = false;
-                                                                        socket.send = origSend;
-                                                                        // Déclenche attacks si demandé ou auto si pas de demande explicite déjà en file
-                                                                        if (socket.__deferredTornAttacks || socket.__autoTriggerAttacksAfterLogs) {
-                                                                            const shouldAuto = socket.__deferredTornAttacks || socket.__autoTriggerAttacksAfterLogs;
-                                                                            socket.__deferredTornAttacks = false;
-                                                                            socket.__autoTriggerAttacksAfterLogs = false;
-                                                                            try { require('../ws/wsTornAttacks.cjs')(socket, req, fastify); } catch(e){ fastify.log.error(e); }
-                                                                        }
-                                                                    }
-                                                                } else if (j && j.type === 'importedData' && typeof j.logsImported === 'number') {
-                                                                    // Log importedData (ancienne logique) -> rien, géré par percent maintenant
-                                                                }
-                                                            } catch { /* ignore parse */ }
-                                                        }
-                                                    } catch {}
-                                                    return origSend(payload, ...rest);
-                                                };
-                                                // Lancer import logs
-                                                require('../ws/wsTorn.cjs')(socket, req, fastify);
+                        if (socket.__importingLogs) {
+                            try { socket.send(JSON.stringify({ type: 'importProgress', kind: 'logs', error: 'already_running', phase: 'rejected' })); } catch (_) {}
+                            return;
+                        }
+                        socket.__importingLogs = true;
+                        socket.__logsProgress = 0;
+                        socket.__logsImportStartedAt = Date.now();
+                        try { require('../ws/wsTorn.cjs')(socket, req, fastify, { managedByRouter: true }); } catch (e) {
+                            socket.__importingLogs = false;
+                            fastify.log.error(`[ws] torn handler error: ${e.message}`);
+                            try { socket.send(JSON.stringify({ type: 'importProgress', kind: 'logs', error: 'Synchronization could not be completed. Please retry.' })); } catch (_) {}
+                        }
                         return;
                     case 'tornAttacks':
-                                                if (socket.__importingLogs) {
-                                                        // Toujours différer jusqu'à >=100% ou timeout
-                                                        fastify.log.info({ connId, progress: socket.__logsProgress }, '[ws] tornAttacks command deferred (logs importing)');
-                                                        socket.__deferredTornAttacks = true;
-                                                        try { socket.send(JSON.stringify({ type:'deferred', reason:'logsImportInProgress', target:'tornAttacks', progress: socket.__logsProgress })); } catch {}
-                                                        // Mettre en place un watchdog timeout si jamais 100% ne vient pas (ex: import très court ou bloqué)
-                                                        if (!socket.__attacksWatchdog) {
-                                                            socket.__attacksWatchdog = setTimeout(() => {
-                                                                if (socket.__importingLogs && socket.__logsProgress < 100) {
-                                                                    fastify.log.warn({ connId, progress: socket.__logsProgress }, '[ws] attacks watchdog firing before 100%');
-                                                                    socket.__autoTriggerAttacksAfterLogs = true; // se déclenchera quand patch send voit 100%
-                                                                }
-                                                            }, Number(process.env.ATTACKS_DEFER_TIMEOUT_MS || 45000));
-                                                        }
-                                                        return;
-                                                }
-                                                if (socket.__logsProgress != null && socket.__logsProgress < 100) {
-                                                        // Cas où import s’est terminé sans atteindre 100 (edge) -> forcer log puis lancer
-                                                        fastify.log.warn({ connId, progress: socket.__logsProgress }, '[ws] tornAttacks started with progress<100 (edge)');
-                                                }
-                                                fastify.log.info({ connId }, '[ws] tornAttacks command (logs completed)');
-                                                try { require('../ws/wsTornAttacks.cjs')(socket, req, fastify); } catch(e){ fastify.log.error(e); }
+                        if (socket.__importingLogs) {
+                            fastify.log.info({ connId, progress: socket.__logsProgress }, '[ws] tornAttacks command deferred (logs importing)');
+                            socket.__deferredTornAttacks = true;
+                            try { socket.send(JSON.stringify({ type:'deferred', reason:'logsImportInProgress', target:'tornAttacks', progress: socket.__logsProgress })); } catch (_) {}
+                            if (!socket.__attacksWatchdog) {
+                                socket.__attacksWatchdog = setTimeout(() => {
+                                    if (socket.__importingLogs) {
+                                        fastify.log.warn({ connId }, '[ws] cancelling deferred attacks after log timeout');
+                                        socket.__stopImport = socket.__stopImport || {};
+                                        socket.__stopImport.logs = true;
+                                    }
+                                }, Number(process.env.ATTACKS_DEFER_TIMEOUT_MS || 45000));
+                            }
+                            return;
+                        }
+                        fastify.log.info({ connId }, '[ws] tornAttacks command');
+                        try { require('../ws/wsTornAttacks.cjs')(socket, req, fastify); } catch(e){ fastify.log.error(e); }
                         return;
                     case 'checkSession':
                         fastify.log.info({ connId }, '[ws] checkSession command');
@@ -441,24 +427,18 @@ module.exports = (fastify, isTest) => {
                                     } else if (parsed.type === "stopImport") {
                                       // Définir les flags d'arrêt pour les imports en cours
                                       try {
-                                        const kinds = Array.isArray(
-                                          parsed.kinds,
-                                        )
+                                        const requestedKinds = Array.isArray(parsed.kinds)
                                           ? parsed.kinds
-                                          : ["logs", "attacks"];
-                                        socket.__stopImport =
-                                          socket.__stopImport || {};
-                                        kinds.forEach((k) => {
-                                          socket.__stopImport[k] = true;
-                                        });
+                                          : ['logs', 'attacks'];
+                                        const kinds = requestedKinds.filter(kind => kind === 'logs' || kind === 'attacks');
+                                        socket.__stopImport = socket.__stopImport || {};
+                                        kinds.forEach(kind => { socket.__stopImport[kind] = true; });
                                         try {
-                                          socket.send(
-                                            JSON.stringify({
-                                              type: "stopImportAck",
-                                              kinds,
-                                              time: Date.now(),
-                                            }),
-                                          );
+                                          socket.send(JSON.stringify({
+                                            type: 'stopImportAck',
+                                            kinds,
+                                            time: Date.now(),
+                                          }));
                                         } catch (_) {}
                                       } catch (e) {
                                         fastify.log.error(e);

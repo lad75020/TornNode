@@ -1,35 +1,53 @@
-// wsGetTornAttacks.js
-// Calque la logique de la route HTTP getTornAttacks mais via WebSocket.
-module.exports = async function wsGetTornAttacks(socket, req, fastify, payload) {
+'use strict';
+
+const getUserDb = require('../utils/getUserDb.cjs');
+const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
+const {
+  SAFE_ERRORS,
+  getAuthenticatedSession,
+  parseRange,
+  sendJson,
+  logMessage,
+} = require('../utils/tornSyncHelpers.cjs');
+
+module.exports = async function wsGetTornAttacks(socket, req, fastify, payload = {}) {
+  const session = getAuthenticatedSession(req, { requireApiKey: true });
+  if (!session.ok) {
+    sendJson(socket, { type: 'getTornAttacks', error: SAFE_ERRORS.ATTACK_RETRIEVAL_FAILED });
+    return;
+  }
+  const range = parseRange(payload);
+  if (!range.ok) {
+    sendJson(socket, { type: 'getTornAttacks', error: SAFE_ERRORS.INVALID_RANGE });
+    return;
+  }
+
   try {
-    if (!req.session || !req.session.TornAPIKey) {
-      return socket.send(JSON.stringify({ type: 'getTornAttacks', error: 'Invalid session' }));
-    }
-    const { from, to } = payload;
-    if (!Number.isFinite(from) || !Number.isFinite(to)) {
-      return socket.send(JSON.stringify({ type: 'getTornAttacks', error: 'Missing from/to' }));
-    }
-  const getUserDb = require('../utils/getUserDb.cjs');
-  const ensureUserDbStructure = require('../utils/ensureUserDbStructure.cjs');
-  await ensureUserDbStructure(fastify, req.session.userId, fastify?.log);
-  const database = getUserDb(fastify, req);
+    await ensureUserDbStructure(fastify, session.userId, fastify && fastify.log);
+    const database = getUserDb(fastify, req);
     const attacksCollection = database.collection('attacks');
-    const aFilter = { started: { $gt: parseInt(from, 10), $lt: parseInt(to, 10) } };
-    const options = { projection: { _id: 0, code: 0 } };
-    const cursor = attacksCollection.find(aFilter, options);
-    let attacks = 0, defends = 0, wins = 0, losses = 0;
-    for await (const doc of cursor) {
-      if (doc.attacker && doc.attacker.id === req.session.userId) {
-        attacks++;
-        if (!['Lost'].includes(doc.result)) wins++; else losses++;
-      } else if (doc.attacker) {
-        defends++;
-        if (['Lost'].includes(doc.result)) wins++; else losses++;
+    const filter = { started: { $gte: range.from, $lte: range.to } };
+    const cursor = attacksCollection.find(filter, { projection: { _id: 0, code: 0 } });
+    let attacks = 0;
+    let defends = 0;
+    let wins = 0;
+    let losses = 0;
+    try {
+      for await (const doc of cursor) {
+        const attackerId = doc && doc.attacker && Number(doc.attacker.id);
+        const isAttack = Number.isSafeInteger(attackerId) && attackerId === session.userId;
+        if (isAttack) attacks += 1;
+        else if (doc && doc.attacker) defends += 1;
+        const lost = doc && doc.result === 'Lost';
+        if ((isAttack && !lost) || (!isAttack && lost)) wins += 1;
+        else losses += 1;
       }
+    } finally {
+      try { if (cursor && typeof cursor.close === 'function') await cursor.close(); } catch (_) {}
     }
-    socket.send(JSON.stringify({ type: 'getTornAttacks', from, to, wins, losses, attacks, defends }));
-  } catch (e) {
-    try { socket.send(JSON.stringify({ type: 'getTornAttacks', error: e.message })); } catch(_) {}
-    if (fastify?.log) fastify.log.error('[wsGetTornAttacks] '+e.message);
+    sendJson(socket, { type: 'getTornAttacks', from: range.from, to: range.to, wins, losses, attacks, defends });
+  } catch (error) {
+    logMessage(fastify, 'warn', 'Torn attack retrieval failed', { userId: session.userId, error: error.message });
+    sendJson(socket, { type: 'getTornAttacks', error: SAFE_ERRORS.ATTACK_RETRIEVAL_FAILED });
   }
 };
